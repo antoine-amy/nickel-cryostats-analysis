@@ -7,11 +7,11 @@ import sys
 import argparse
 from pathlib import Path
 
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
-import matplotlib
 
 # Set up LaTeX rendering with Helvetica font
 matplotlib.rc("text", usetex=True)
@@ -49,7 +49,7 @@ OUTSIDE_HFE = [
 ]
 
 
-def SqrtSumSq(x):
+def sqrt_sum_sq(x):
     """Compute the square root of the sum of squares."""
     x = np.array(x.tolist())
     return np.sqrt(np.sum(x * x))
@@ -76,7 +76,7 @@ def make_plot(
     df,
     groupby,
     filename,
-    xlimits=[0.0001, 1],
+    xlimits=None,
     inside_color="darkgreen",
     outside_color="blue",
     fontsize=8,
@@ -92,8 +92,11 @@ def make_plot(
             Minimum background count to show in the plot. Components below this
             threshold will be excluded.
     """
+    if xlimits is None:
+        xlimits = [0.0001, 1]
+
     # Group and aggregate the data
-    df_grouped = df.groupby(groupby).agg({"TG Mean": np.sum, "TG Spread": SqrtSumSq})
+    df_grouped = df.groupby(groupby).agg({"TG Mean": np.sum, "TG Spread": sqrt_sum_sq})
     df_grouped.sort_values("TG Mean", ascending=True, inplace=True)
 
     # Filter out components below the minimum count threshold
@@ -133,7 +136,7 @@ def make_plot(
     ax.set_yticklabels(labels, fontsize=fontsize)
 
     ax.set_xscale("log")
-    ax.set_xlim(xlimits)
+    ax.set_xlim(xlimits[0], xlimits[1])
     fmt = mticker.FuncFormatter(
         lambda x, pos: f"{x:f}".rstrip("0") if x < 1 else f"{x:.0f}"
     )
@@ -148,12 +151,16 @@ def make_plot(
 
 
 def main():
+    """
+    Parse command line arguments, read background data from Excel file,
+    and generate a plot of intrinsic background components.
+    """
     parser = argparse.ArgumentParser(
         description="Plot BackgroundBudget_Intrinsic_ByComponent_"
     )
     parser.add_argument(
         "--input_file",
-        default="Summary_D-047_v86_250113-233135_2025-02-21.xlsx",
+        default="background/Summary_D-047_v86_250113-233135_2025-02-21.xlsx",
         help="Path to input Excel file",
     )
     parser.add_argument(
@@ -167,18 +174,18 @@ def main():
     )
     args = parser.parse_args()
 
-    inFile = Path(args.input_file)
-    outFolder = Path(args.output_folder)
-    outFolder.mkdir(parents=True, exist_ok=True)
+    in_file = Path(args.input_file)
+    out_folder = Path(args.output_folder)
+    out_folder.mkdir(parents=True, exist_ok=True)
 
-    if not inFile.exists():
-        sys.exit(f"ERROR: File {inFile} not found!")
+    if not in_file.exists():
+        sys.exit(f"ERROR: File {in_file} not found!")
 
-    table = inFile.stem  # Use the file stem to tag the output file name
+    table = in_file.stem  # Use the file stem to tag the output file name
 
     # Read the Excel file
     df = pd.read_excel(
-        inFile,
+        in_file,
         sheet_name="Summary",
         header=0,
         usecols="A:I",
@@ -191,7 +198,8 @@ def main():
         columns={"Background [counts/y/2t/FWHM]": "TG Mean", "Error": "TG Spread"},
         inplace=True,
     )
-    df = df.applymap(lambda x: x.replace("&", r"\&") if isinstance(x, str) else x)
+    # Replace ampersands with escaped ampersands for LaTeX compatibility
+    df = df.replace({"&": r"\&"}, regex=True)
 
     # Clean up the Component names
     # No need to clean up these names since they match OUTSIDE_HFE list
@@ -240,7 +248,7 @@ def main():
 
     # Produce the plot grouped by Component using direct background counts
     output_file = (
-        outFolder / f"BackgroundBudget_Intrinsic_ByComponent_{table}_2tonne.pdf"
+        out_folder /"background"/ f"BackgroundBudget_Intrinsic_ByComponent_{table}_2tonne.pdf"
     )
     make_plot(
         df_intrinsic,
