@@ -93,5 +93,5 @@ plt.grid(True, which="minor", linestyle=":", alpha=0.2)
 plt.tight_layout()
 
 # Save the plot
-plt.savefig("HFE_attenuation.png", dpi=300, bbox_inches="tight")
+plt.savefig("hfe/HFE_attenuation.png", dpi=300, bbox_inches="tight")
 plt.close()

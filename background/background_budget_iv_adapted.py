@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """
 Modified code to create the BackgroundBudget_Intrinsic_ByComponent_ plot with HFE-based coloring.
+Enhanced styling for better readability in LaTeX documents.
 """
 
 import sys
@@ -24,6 +25,19 @@ matplotlib.rcParams["text.latex.preamble"] = "\n".join(
         r"\sisetup{detect-all}",
     ]
 )
+
+# Increase font sizes and styling globally for better readability in LaTeX
+plt.rcParams.update({
+    'font.size': 14,
+    'axes.titlesize': 22,
+    'axes.labelsize': 20,
+    'xtick.labelsize': 18,
+    'ytick.labelsize': 18,
+    'legend.fontsize': 16,
+    'lines.linewidth': 3.0,
+    'lines.markersize': 14,
+    'errorbar.capsize': 6,
+})
 
 # Define components outside HFE
 OUTSIDE_HFE = [
@@ -72,116 +86,118 @@ def reformat_labels_latex(label):
     return mapping.get(label, label)
 
 
-def make_plot(
-    df,
-    groupby,
-    filename,
-    xlimits=None,
-    inside_color="darkgreen",
-    outside_color="darkblue",
-    fontsize=10,
-    min_count=None,
-    scale_factor=None,
-):
+class PlotConfig:
+    """Container for plot configuration parameters."""
+    def __init__(
+        self,
+        xlimits=None,
+        inside_color="darkgreen",
+        outside_color="darkblue",
+        fontsize=10,
+        min_count=None,
+        scale_factor=None,
+        iv_radius=None,
+    ):
+        self.xlimits = [0.0001, 10] if xlimits is None else xlimits
+        self.inside_color = inside_color
+        self.outside_color = outside_color
+        self.fontsize = fontsize
+        self.min_count = min_count
+        self.scale_factor = scale_factor
+        self.iv_radius = iv_radius
+
+
+def _prepare_data(df, groupby, min_count):
+    """Prepare and filter the data for plotting."""
+    df_grouped = df.groupby(groupby).agg({"TG Mean": "sum", "TG Spread": sqrt_sum_sq})
+    df_grouped.sort_values("TG Mean", ascending=True, inplace=True)
+    
+    if min_count is not None:
+        df_grouped = df_grouped[df_grouped["TG Mean"] >= min_count]
+    
+    return df_grouped
+
+
+def _setup_legend(config):
+    """Setup legend elements for the plot."""
+    marker = "o"  # Changed from "." to "o" for better visibility
+    inside_line = Line2D(
+        [], [], color=config.inside_color, marker=marker, 
+        linestyle="-", label="Internal Components", markersize=14, linewidth=3.0
+    )
+    outside_line = Line2D(
+        [], [], color=config.outside_color, marker=marker,
+        linestyle="-", label="External Components", markersize=14, linewidth=3.0
+    )
+    
+    if config.scale_factor is not None:
+        increase_percent = (config.scale_factor - 1) * 100
+        outside_line.set_label(f"External Components (+{increase_percent:.1f}\\%)")
+    
+    return [inside_line, outside_line]
+
+
+def make_plot(df, groupby, filename, **kwargs):
     """
     Group the DataFrame by the specified key, compute error bars,
     and produce a horizontal errorbar plot saved to filename.
     Components are colored differently based on whether they're inside or outside HFE.
 
     Parameters:
-        min_count: float, optional
-            Minimum background count to show in the plot. Components below this
-            threshold will be excluded.
-        scale_factor: float, optional
-            If provided, indicates the scaling factor applied to external components
+        df: DataFrame containing the data
+        groupby: Column(s) to group by
+        filename: Output filename for the plot
+        **kwargs: Additional arguments passed to PlotConfig
     """
-    # Set default xlimits if not provided
-    if xlimits is None:
-        xlimits = [0.0001, 10]
-
-    # Group and aggregate the data
-    df_grouped = df.groupby(groupby).agg({"TG Mean": np.sum, "TG Spread": sqrt_sum_sq})
-    df_grouped.sort_values("TG Mean", ascending=True, inplace=True)
-
-    # Filter out components below the minimum count threshold
-    if min_count is not None:
-        df_grouped = df_grouped[df_grouped["TG Mean"] >= min_count]
-
-    fig, ax = plt.subplots(figsize=(12, 9))
+    config = PlotConfig(**kwargs)
+    df_grouped = _prepare_data(df, groupby, config.min_count)
+    
+    fig, ax = plt.subplots(figsize=(16, 12))  # Increased figure size
     labels = []
-    marker = "."
+    marker = "o"  # Changed from "." to "o" for better visibility
+    legend_elements = _setup_legend(config)
 
-    # Create empty lines for legend
-    inside_line = Line2D(
-        [],
-        [],
-        color=inside_color,
-        marker=marker,
-        linestyle="-",
-        label="Internal Components",
-    )
-    outside_line = Line2D(
-        [],
-        [],
-        color=outside_color,
-        marker=marker,
-        linestyle="-",
-        label="External Components",
-    )
-    legend_elements = [inside_line, outside_line]
-
-    # Loop over groups to plot the background counts and error
+    # Plot data points
     for i, (idx, row) in enumerate(df_grouped.iterrows()):
         value = row["TG Mean"]
         err = row["TG Spread"]
         label = idx if isinstance(idx, str) else " ".join(idx)
         labels.append(label)
-
-        # Choose color based on whether component is outside HFE
-        color = outside_color if label in OUTSIDE_HFE else inside_color
-
+        
+        color = config.outside_color if label in OUTSIDE_HFE else config.inside_color
+        
         ax.errorbar(
-            value,
-            i * 2,
-            xerr=err,
-            lw=2,
-            capsize=2,
-            capthick=2,
-            color=color,
-            marker=marker,
-            markersize=10,
+            value, i * 2, xerr=err, lw=3.0, capsize=6, capthick=3.0,
+            color=color, marker=marker, markersize=14
         )
 
-    # Format y-axis with LaTeX formatted labels
+    # Format axes
     labels = [reformat_labels_latex(l) for l in labels]
     y_positions = np.arange(0, 2 * len(labels), 2)
     ax.set_yticks(y_positions)
-    ax.set_yticklabels(labels, fontsize=fontsize)
-
+    ax.set_yticklabels(labels, fontsize=16)  # Increased font size
+    
     ax.set_xscale("log")
-    ax.set_xlim(xlimits[0], xlimits[1])
+    ax.set_xlim(config.xlimits[0], config.xlimits[1])
     fmt = mticker.FuncFormatter(
         lambda x, pos: f"{x:f}".rstrip("0") if x < 1 else f"{x:.0f}"
     )
     ax.xaxis.set_major_formatter(fmt)
-    ax.set_xlabel(r"Background counts/(y/2t/FWHM)", fontsize=14)
-    ax.grid(which="major", axis="x", linestyle="-")
-    ax.grid(which="minor", axis="x", linestyle="dashed")
-
-    # Add legend with scaling information if applicable
-    if scale_factor is not None:
-        increase_percent = (scale_factor - 1) * 100
-        # Modify the external components label to include the scaling factor
-        outside_line.set_label(f"External Components (+{increase_percent:.1f}\\%)")
-
-    ax.legend(handles=legend_elements, loc="upper left", fontsize=fontsize + 1)
-
-    # Increase tick label sizes
-    ax.tick_params(axis="both", which="major", labelsize=fontsize + 1)
-    ax.tick_params(axis="both", which="minor", labelsize=fontsize + 1)
-
+    ax.set_xlabel(r"Background counts/(y/2t/FWHM)", fontsize=20)  # Increased font size
+    ax.grid(which="major", axis="x", linestyle="-", linewidth=1.5)
+    ax.grid(which="minor", axis="x", linestyle="dashed", linewidth=1.0)
+    
+    ax.legend(handles=legend_elements, loc="upper left", fontsize=16)
+    ax.tick_params(axis="both", which="major", labelsize=18)
+    ax.tick_params(axis="both", which="minor", labelsize=18)
+    
+    # Add title if radius is provided
+    if config.scale_factor is not None and getattr(config, 'iv_radius', None) is not None:
+        ax.set_title(f"Background Budget (Inner Vessel r = {config.iv_radius:.0f} mm)", 
+                   fontsize=22, pad=20)
+    
     plt.tight_layout()
-    plt.savefig(filename, dpi=300, transparent=True, bbox_inches="tight")
+    plt.savefig(filename, dpi=400, transparent=True, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -306,6 +322,7 @@ def main():
     df_intrinsic = df[df["Category"].str.startswith("Intrinsic")].copy()
 
     # Apply HFE scaling to external components if radius is provided
+    scale_factor = None
     if args.iv_radius is not None:
         scale_factor = calculate_hfe_scale(args.iv_radius)
         # Scale the background and error for external components
@@ -330,7 +347,8 @@ def main():
         inside_color="darkgreen",
         outside_color="darkblue",
         min_count=args.min_count,
-        scale_factor=scale_factor if args.iv_radius is not None else None,
+        scale_factor=scale_factor,
+        iv_radius=args.iv_radius,
     )
 
 
