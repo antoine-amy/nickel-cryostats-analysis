@@ -1,9 +1,12 @@
+"""
+Plot mass attenuation coefficients for HFE-7000 across different photon energies.
+"""
+from io import StringIO
 import numpy as np
 import matplotlib.pyplot as plt
-from io import StringIO
 
 # Data as string (same as before)
-data_str = """Photon    Coherent Incoher. Photoel. Nuclear  Electron Tot. w/  Tot. wo/ 
+DATA_STR = """Photon    Coherent Incoher. Photoel. Nuclear  Electron Tot. w/  Tot. wo/ 
 Energy    Scatter. Scatter. Absorb.  Pr. Prd. Pr. Prd. Coherent Coherent 
 1.000E-01 5.923E-03 1.438E-01 3.444E-03 0.000E+00 0.000E+00 1.532E-01 1.473E-01 
 1.500E-01 2.707E-03 1.305E-01 9.146E-04 0.000E+00 0.000E+00 1.341E-01 1.314E-01 
@@ -30,7 +33,7 @@ Energy    Scatter. Scatter. Absorb.  Pr. Prd. Pr. Prd. Coherent Coherent
 1.000E+01 6.249E-07 1.516E-02 1.741E-07 4.925E-03 3.468E-04 2.044E-02 2.044E-02"""
 
 # Convert string data to numpy array
-data = np.genfromtxt(StringIO(data_str), skip_header=2)
+data = np.genfromtxt(StringIO(DATA_STR), skip_header=2)
 
 # Extract columns
 energy = data[:, 0]  # MeV
@@ -42,7 +45,7 @@ electron = data[:, 5]
 total = data[:, 6]
 
 # Set figure parameters
-plt.figure(figsize=(12, 9))
+plt.figure(figsize=(9, 7))
 plt.grid(True, which="both", ls="-", alpha=0.2)
 
 # Plot individual components with different colors and styles
@@ -80,7 +83,7 @@ idx_2_5MeV = np.where(abs(energy - 2.5) < 1e-10)[0][0]
 plt.plot(2.5, total[idx_2_5MeV], "ro", markersize=8)
 plt.annotate(
     "2.5 MeV: 0.04 cm²/g",
-    xy=(2.5, total[idx_2_5MeV]),
+    xy=(2.5, float(total[idx_2_5MeV])),
     xytext=(1.5, 0.006),  # Adjusted position
     arrowprops=dict(facecolor="red", shrink=0.05),
     fontsize=20,
@@ -91,7 +94,4 @@ plt.grid(True, which="minor", linestyle=":", alpha=0.2)
 
 # Adjust layout
 plt.tight_layout()
-
-# Save the plot
-plt.savefig("hfe/HFE_attenuation.png", dpi=300, bbox_inches="tight")
-plt.close()
+plt.show()
