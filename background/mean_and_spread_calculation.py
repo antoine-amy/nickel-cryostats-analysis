@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Background contribution and TG spread calculation.
+Background contribution and TG-spread calculation
+with automatic statistical efficiency errors.
+
+Antoine Amy — June 2025
 """
 import math
 
@@ -8,84 +11,125 @@ SECONDS_PER_YEAR = 86400 * 365.25
 EPS = 1e-15
 
 
-def calculate_bg_contribution(mass, activity, activity_err, efficiency, efficiency_err):
-    """Calculate truncated mean and Excel TG spread uncertainty per year."""
+# ─── Helper: binomial 1 σ error on parent-level efficiency ────────────────
+def efficiency_error(mu: float, n_decays: int, branching: float = 1.0) -> float:
+    """
+    σ = sqrt(mu * branching / N)
+
+    Parameters
+    ----------
+    mu : float
+        Efficiency per PARENT decay.
+    n_decays : int
+        Total number of parent decays simulated.
+    branching : float, optional
+        Branching ratio used to scale the conditional efficiency
+        back to parent-level, by default 1.0.
+
+    Returns
+    -------
+    float
+        1 σ statistical error on `mu`.
+    """
+    return math.sqrt(mu * branching / n_decays)
+
+
+# ─── Core TG-spread machinery (unchanged) ─────────────────────────────────
+def calculate_bg_contribution(mass, activity, activity_err,
+                              efficiency, efficiency_err):
+    """Return (truncated mean, TG-spread) in counts / y / 2t / FWHM."""
     t = mass * activity * efficiency
     u = math.hypot(mass * efficiency * activity_err,
-                   mass * activity * efficiency_err)
-    if u < EPS:
+                   mass * activity   * efficiency_err)
+
+    if u < EPS:                       # no uncertainty ⇒ no truncation
         return max(0.0, t) * SECONDS_PER_YEAR, 0.0
 
-    z = t / u
-    pdf = math.exp(-0.5 * z * z) / math.sqrt(2 * math.pi)
-    cdf = 0.5 * (1 + math.erf(z / math.sqrt(2)))
+    z   = t / u
+    pdf = math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
+    cdf = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
 
-    # Truncated mean
-    mean_sec = 0.0
-    if cdf > EPS:
-        mean_sec = max(0.0, t + u * (pdf / cdf))
+    # truncated mean
+    mean_sec = t + u * (pdf / cdf) if cdf > EPS else 0.0
+    mean_sec = max(0.0, mean_sec)
 
-    # Excel TG Spread
-    term_b = 1 + math.erf(z / math.sqrt(2))
+    # Excel TG-spread
+    term_b   = 1.0 + math.erf(z / math.sqrt(2.0))
     a_over_b = (math.exp(-0.5 * z * z) / term_b) if term_b > EPS else 0.0
-    inner = 1 - (z * a_over_b) / math.sqrt(8 * math.pi) \
-            - (a_over_b * a_over_b) / (8 * math.pi)
+    inner    = 1.0 - (z * a_over_b) / math.sqrt(8.0 * math.pi) \
+                     - (a_over_b ** 2) / (8.0 * math.pi)
     spread_sec = u * math.sqrt(inner) if inner > 0 else 0.0
 
+    # convert to counts / year
     return mean_sec * SECONDS_PER_YEAR, spread_sec * SECONDS_PER_YEAR
 
 
-def run_calculation(mass, components):
-    """Compute background for each component and totals."""
+def run_calculation(mass, component_list):
+    """Compute background for each component and a quadrature total."""
     results = {}
-    for name, activity, activity_err, eff, eff_err in components:
-        mean, spread = calculate_bg_contribution(
-            mass, activity, activity_err, eff, eff_err
-        )
-        results[name] = {'mean': mean, 'spread': spread}
+    for (name, act, act_err,
+         eff, eff_err,
+         n_decays, branch) in component_list:
 
-    total_mean = sum(v['mean'] for v in results.values())
+        # derive statistical σ if requested
+        if eff_err is None:
+            eff_err = efficiency_error(eff, n_decays, branch)
+
+        mean, spread = calculate_bg_contribution(
+            mass, act, act_err, eff, eff_err
+        )
+        results[name] = {
+            'mean':     mean,
+            'spread':   spread,
+            'eff_err':  eff_err,
+            'mu':       eff
+        }
+
+    total_mean   = sum(v['mean'] for v in results.values())
     total_spread = math.sqrt(sum(v['spread']**2 for v in results.values()))
     results['total'] = {'mean': total_mean, 'spread': total_spread}
-
     return results
 
 
+# ─── Main block ───────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    # Input values
-    COMPONENT_MASS = 31810.0  # kg
+
+    COMPONENT_MASS = 31_810.0  # kg
+
+    # Tuple layout:
+    # (name, activity [Bq/kg], activity_err,
+    #  efficiency μ, efficiency_err (None ⇒ statistical),
+    #  N_decays, branching)
     components = [
-        ('u238', 0.0, 3.233e-8, 1.770e-7, 1.330e-8),
-        ('th232', 0.0, 3.257e-9, 2.074e-7, 8.633e-9),
+
+        # U-238 — γ comes directly from parent (branching = 1)
+        ('u238', 0.0, 3.233e-8,
+         1.770e-7, None,
+         1_000_000_000, 1.0),
+
+        # Th-232 — efficiency scaled by 208Tl γ branch (35.94 %)
+        ('th232', 0.0, 3.257e-9,
+         2.074e-7, None,
+         1_000_000_000, 0.3594),
     ]
-    expected = {
-        'u238': (4.584e-3, 5.630e-3),
-        'th232': (5.410e-4, 6.644e-4),
-    }
 
-    # Run
-    results = run_calculation(COMPONENT_MASS, components)
+    # ---------- calculation ----------
+    calc_results = run_calculation(COMPONENT_MASS, components)
 
-    # Output
-    print("\n--- Final Calculation Results (Using Excel TG Spread formula) ---")
-    print(f"Component Mass: {COMPONENT_MASS} kg")
+    # ---------- nicely formatted output ----------
+    print("\n--- Final Calculation Results (Excel TG-spread) ---")
+    print(f"Component mass: {COMPONENT_MASS:.1f} kg\n")
 
-    print("\nInput Data:")
-    for name, activity, activity_err, eff, eff_err in components:
-        LABEL = 'U-238' if name == 'u238' else 'Th-232'
-        print(f"  {LABEL} Activity: {activity:.2e} +/- {activity_err:.2e} Bq/kg")
-        print(f"  {LABEL} Efficiency: {eff:.3e} +/- {eff_err:.3e} [counts/decay/2t/FWHM]")
+    header = ("Isotope", "μ (efficiency)", "σ_μ (stat)",
+              "⟨BG⟩ [cnt/y]", "± TG_spread")
+    print(f"{header[0]:<8s} {header[1]:>13s} {header[2]:>13s} {header[3]:>14s} {header[4]:>14s}")
 
-    print("\nCalculated Background Contributions [counts/y/2t/FWHM]")
-    print("  (Using Truncated Mean and Excel 'TG Spread' Uncertainty)")
-    print(f"  U-238 : {results['u238']['mean']:.5e} +/- {results['u238']['spread']:.5e}")
-    print(f"  Th-232: {results['th232']['mean']:.5e} +/- {results['th232']['spread']:.5e}")
-    total = results['total']
-    print(f"  Total : {total['mean']:.5e} +/- {total['spread']:.5e} (Note: quadrature sum error)")
+    for comp in components:           # preserve original order
+        COMP_NAME = comp[0]
+        res  = calc_results[COMP_NAME]
+        print(f"{COMP_NAME:<8s} {res['mu']:13.3e} {res['eff_err']:13.3e}"
+              f" {res['mean']:14.3e} {res['spread']:14.3e}")
 
-    print("\nComparison with expected 'good values' [counts/y/2t/FWHM]")
-    print(f"  Calculated U-238: {results['u238']['mean']:.3e} +/- {results['u238']['spread']:.3e}")
-    print(f"  Expected U-238:   {expected['u238'][0]:.3e} +/- {expected['u238'][1]:.3e}")
-    print(
-        f"  Calculated Th-232: {results['th232']['mean']:.3e} +/- {results['th232']['spread']:.3e}")
-    print(f"  Expected Th-232:   {expected['th232'][0]:.3e} +/- {expected['th232'][1]:.3e}")
+    total = calc_results['total']
+    print("\nTotal background: "
+          f"{total['mean']:.3e} ± {total['spread']:.3e} counts/y (quadrature)")
