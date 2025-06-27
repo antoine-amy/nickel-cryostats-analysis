@@ -105,12 +105,12 @@ if __name__ == '__main__':
         # U-238 — γ comes directly from parent (branching = 1)
         ('u238', 0.0, 3.233e-8,
          1.770e-7, None,
-         1_000_000_000, 1.0),
+         1e10, 1.0),
 
         # Th-232 — efficiency scaled by 208Tl γ branch (35.94 %)
         ('th232', 0.0, 3.257e-9,
          2.074e-7, None,
-         1_000_000_000, 0.3594),
+         1e10, 0.3594),
     ]
 
     # ---------- calculation ----------
@@ -124,7 +124,7 @@ if __name__ == '__main__':
               "⟨BG⟩ [cnt/y]", "± TG_spread")
     print(f"{header[0]:<8s} {header[1]:>13s} {header[2]:>13s} {header[3]:>14s} {header[4]:>14s}")
 
-    for comp in components:           # preserve original order
+    for comp in components:
         COMP_NAME = comp[0]
         res  = calc_results[COMP_NAME]
         print(f"{COMP_NAME:<8s} {res['mu']:13.3e} {res['eff_err']:13.3e}"
