@@ -10,22 +10,32 @@ means = {
     '2025 Budget':           {'Th-232': 9.72e-9,    'U-238': 9.00e-9},
     'Lip Part\n(02/25, no supports/tubings)': {'Th-232': 2.15e-9, 'U-238': 0.80e-9},
     'Lip Part\n(03/25)':     {'Th-232': 2.15e-9,    'U-238': 0.50e-9},
-    'Lower/Lip/Upper\n(04/25)':              {'Th-232': 4.53e-9, 'U-238': 0.70e-9},
-    'Lip/Lower/Upper\n(04/25)':              {'Th-232': 5.13942e-9, 'U-238': 0.80e-9},
-    'Lip/Lower/Upper\n(04/25; 2024 recon. code)': {'Th-232': 2.1564e-9, 'U-238': 0.80e-9},
-    'Lip/Lower/Upper\n(04/25, no radius, no kill external γ)': {
+    'Upper Part\n(test 1; 04/25)':              {'Th-232': 4.53e-9, 'U-238': 0.70e-9},
+    'Upper Part\n(test 2; 04/25)':              {'Th-232': 5.13942e-9, 'U-238': 0.80e-9},
+    #'Lip/Lower/Upper\n(04/25; 2024 recon. code)': {'Th-232': 2.1564e-9, 'U-238': 0.80e-9},
+    'Upper Part\n(04/25, no radius, no kill external γ)': {
         'Th-232': 3.98934e-9, 'U-238': 0.30e-9
     },
     'Upper Part\n(04/25)':     {'Th-232': 3.34242e-9, 'U-238': 0.70e-9},
     'Lower Part\n(04/25)':     {'Th-232': 2.37204e-9, 'U-238': 0.00e-9},
     'Lip Part\n(04/25)':       {'Th-232': 2.04858e-9, 'U-238': 0.30e-9},
     'Lip/Lower/Upper\n(05/25, \"source/add\" fix)': {'Th-232': 2.91114e-9, 'U-238': 1.10000e-9},
+    'IV shell\n(07/25)': {'Th-232': 2.19234e-9, 'U-238': 1.0e-9},
+    'Lower Part\n(07/25; recon check)': {'Th-232': 2.0845199999999997e-9, 'U-238': 0.3e-9},
+    'IV shell\n(07/25; recon check)': {'Th-232': 2.47986e-9, 'U-238': 0.9e-9},
 }
 
 # ─── Constants ─────────────────────────────────────────────────────────────────
-NG = 1e10               # Number of generated events
+NG_SIM = 1e10           # Number of generated events for simulations
+NG_BUDGET = 1e9         # Number of generated events for budgets
 SCALE = 1e9             # Scale efficiencies to ×10⁻⁹ for plotting
 SHOW_ONLY_APRIL_2025 = False  # If True, only show April 2025 parts and budgets
+
+# Branching ratios for error calculation
+BRANCHING_RATIOS = {
+    'Th-232': 0.3594,  # 208Tl γ branch (35.94%)
+    'U-238': 1.0       # γ comes directly from parent
+}
 
 # ─── Label grouping ───────────────────────────────────────────────────────────
 budget_labels = [lbl for lbl in means if 'Budget' in lbl]
@@ -46,19 +56,22 @@ plot_labels = budget_labels + result_labels
 def compute_errors(means_dict: dict) -> dict:
     error_dict = {}
     for config_label, vals in means_dict.items():
-        if 'Budget' in config_label:
-            # Use fixed uncertainties for budgets
-            error_dict[config_label] = {'Th-232': 1.869e-9, 'U-238': 3.00e-9}
-        else:
-            # Poisson-based errors; force 1/NG if N_sel = 0
-            errs = {}
-            for isotope, eff in vals.items():
-                n_selected = eff * NG
-                if n_selected > 0:
-                    errs[isotope] = np.sqrt(n_selected) / NG
-                else:
-                    errs[isotope] = 1.0 / NG
-            error_dict[config_label] = errs
+        # Choose NG based on configuration type
+        ng = NG_BUDGET if 'Budget' in config_label else NG_SIM
+        
+        # Poisson-based errors with branching ratio correction for all configurations
+        errs = {}
+        for isotope, eff in vals.items():
+            branching = BRANCHING_RATIOS[isotope]
+            n_selected = (eff * ng) / branching
+            if n_selected > 0:
+                # Include branching ratio in error calculation: σ = sqrt(μ * branching / N)
+                errs[isotope] = np.sqrt(eff * branching / ng)
+                print(np.sqrt(eff * branching / ng))
+                print((branching*np.sqrt((n_selected/branching) / ng))/ng)
+            else:
+                errs[isotope] = 1.0 / ng
+        error_dict[config_label] = errs
     return error_dict
 
 errors = compute_errors(means)
@@ -114,4 +127,23 @@ fig.legend(handles=legend_elems, loc='upper right', bbox_to_anchor=(0.98, 0.98),
            fontsize='small', title='Part type')
 
 plt.tight_layout(pad=1.0, h_pad=0.5)
+
+# ─── Print efficiency table ──────────────────────────────────────────────────
+print("\n" + "="*80)
+print("EFFICIENCY AND ERROR TABLE")
+print("="*80)
+print(f"{'Configuration':<35s} {'Th-232 (×10⁻⁹)':<20s} {'U-238 (×10⁻⁹)':<20s}")
+print(f"{'':<35s} {'Efficiency':<10s} {'Error':<10s} {'Efficiency':<10s} {'Error':<10s}")
+print("-"*80)
+
+for label in plot_labels:
+    th_val = means[label]['Th-232'] * SCALE
+    th_err = errors[label]['Th-232'] * SCALE
+    u_val = means[label]['U-238'] * SCALE
+    u_err = errors[label]['U-238'] * SCALE
+    
+    print(f"{label:<35s} {th_val:10.3e} {th_err:10.3e} {u_val:10.3e} {u_err:10.3e}")
+
+print("="*80)
+
 plt.show()

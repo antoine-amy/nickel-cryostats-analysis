@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Cryostat + HFE + Vessel backgrounds vs inner-vessel radius
-–––––––––––––––––––––––––––––––––––––––––––––––––––––
-Streamlined: best-fit curves, MC points with error bars for HFE, IV, and OV with consistent coloring.
+Cryostat + HFE + Vessel + Water-theoretical backgrounds vs inner-vessel radius
+–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Streamlined: best-fit curves, MC points with error bars for HFE, IV, OV,
+and theoretical water background with uncertainty bands.
 """
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import ScalarFormatter, LogFormatterSciNotation
 
 # ============================================================================
 # Constants and inputs
@@ -28,16 +29,16 @@ DENSITY_T_PER_M3 = 1.72           # t/m³
 VOL_OFFSET_M3    = 2.2 - 0.58     # m³ at R=169.1 cm
 HARDWARE_MASS_T  = 0.240          # t
 
-# Radius grid
+# Radius grid (cm)
 r_cm = np.linspace(95, 170, 300)
 dr   = r_cm[1] - r_cm[0]
 
 # ============================================================================
 # Monte-Carlo data + errors
 # ============================================================================
-r_mc       = np.array([102.6, 110.0, 130.0, 169.1])  # cm
-bg_mc      = np.array([4.40751e-3, 4.43671e-3, 4.96e-3, 5e-3])
-bg_mc_err  = np.array([5.11e-3,    5.09e-3,    5.72e-3,    5.75e-3])
+r_mc       = np.array([100.0, 102.6, 110.0, 130.0, 169.1])  # cm
+bg_mc      = np.array([4.16e-3, 4.40751e-3, 4.43671e-3, 4.96e-3, 5e-3])
+bg_mc_err  = np.array([4.78e-3, 5.11e-3, 5.09e-3, 5.72e-3, 5.75e-3])
 
 iv_radii    = np.array([1026, 1226, 1510, 1691]) / 10  # cm
 iv_bgmc     = np.array([3.98e-3, 1.07e-3, 1.84e-4, 5.62e-5])
@@ -46,6 +47,15 @@ iv_bgmc_err = np.array([2.97e-3, 6.95e-4, 1.09e-4, 3.45e-5])
 ov_radii    = iv_radii                                # cm
 ov_bgmc     = np.array([4.79e-3, 1.58e-3, 2.82e-4, 8.15e-5])
 ov_bgmc_err = np.array([3.43e-3, 1.00e-3, 1.73e-4, 3.98e-5])
+
+# ============================================================================
+# Water-theoretical background parameters
+# ============================================================================
+MU_W    = 0.00611       # attenuation coeff. in water (1/mm)
+MU_W_ERR= 0.0005        # uncertainty in MU_W (1/mm)
+R0_W    = 1691.0        # reference radius (mm)
+B0      = 7.391e-05     # mean water background at R0 (counts/yr)
+B0_ERR  = 5.858e-05     # uncertainty on B0 (counts/yr)
 
 # ============================================================================
 # Geometry helpers
@@ -80,9 +90,11 @@ def bg_geometry(mu):
 # Fit μ_HFE to the MC points
 # ============================================================================
 mu_vals = np.linspace(0.02, 0.12, 600)
-rss = [np.sum((np.interp(r_mc, r_cm, bg_geometry(mu)) - bg_mc)**2) for mu in mu_vals]
+rss = [np.sum((np.interp(r_mc, r_cm, bg_geometry(mu)) - bg_mc)**2)
+       for mu in mu_vals]
 mu_best = mu_vals[np.argmin(rss)]
-print(f"Best-fit μ_HFE = {mu_best:.5f} cm⁻¹ (~{mu_best / MU_TABULATED:.2f}× tabulated)")
+print(f"Best-fit μ_HFE = {mu_best:.5f} cm⁻¹ "
+      f"(~{mu_best / MU_TABULATED:.2f}× tabulated)")
 
 # ============================================================================
 # Fit IV and OV with log-linear model
@@ -97,58 +109,121 @@ coef_ov = np.polyfit(r_mm_ov - r0_ov, np.log(ov_bgmc), 1)
 mu_ov_fit = -coef_ov[0]
 logA_ov   = coef_ov[1]
 
+# ←—— insert this line to print the OV μ
+print(f"Best‑fit μ_OV = {mu_ov_fit:.5f} mm⁻¹ "
+      f"(≈{(mu_ov_fit*10):.5f} cm⁻¹)")
+
+# ============================================================================
+# Compute water-theoretical background curves
+# ============================================================================
+
+
+# ============================================================================
+# Compute water-theoretical background curves
+# ============================================================================
+r_mm       = r_cm * 10.0
+delta_mm   = r_mm - R0_W
+br_central = B0 * np.exp(-MU_W * delta_mm)
+br_up_mu   = B0 * np.exp(-(MU_W - MU_W_ERR) * delta_mm)
+br_dn_mu   = B0 * np.exp(-(MU_W + MU_W_ERR) * delta_mm)
+br_up_b0   = (B0 + B0_ERR) * np.exp(-MU_W * delta_mm)
+br_dn_b0   = (B0 - B0_ERR) * np.exp(-MU_W * delta_mm)
+upper_w    = np.maximum(br_up_mu, br_up_b0)
+lower_w    = np.minimum(br_dn_mu, br_dn_b0)
+
 # ============================================================================
 # Plot
 # ============================================================================
 plt.rc('font', size=12)
-fig, ax1 = plt.subplots(figsize=(12,8))
+fig, ax1 = plt.subplots(figsize=(13, 9))
 
 # Colors for components
-HFE_COLOR = '#4A90A4'
-IV_COLOR  = '#D2691E'
-OV_COLOR  = '#228B22'
+HFE_COLOR   = '#1f77b4'  # Blue
+IV_COLOR    = '#ff7f0e'  # Orange  
+OV_COLOR    = '#2ca02c'  # Green
+WATER_COLOR = '#9467bd'  # Purple
 
 # Plot fits
-ax1.semilogy(r_cm, bg_geometry(mu_best), '--', color=HFE_COLOR, label='HFE fit', lw=2)
+ax1.semilogy(r_cm, bg_geometry(mu_best), '-', color=HFE_COLOR,
+             label='HFE fit', lw=3, alpha=0.8)
 bg_iv_fit = np.exp(logA_iv + coef_iv[0] * (r_cm*10 - r0_iv))
-ax1.semilogy(r_cm, bg_iv_fit, '--', color=IV_COLOR, label='IV fit', lw=2)
+ax1.semilogy(r_cm, bg_iv_fit, '-', color=IV_COLOR,
+             label='IV fit', lw=3, alpha=0.8)
 bg_ov_fit = np.exp(logA_ov + coef_ov[0] * (r_cm*10 - r0_ov))
-ax1.semilogy(r_cm, bg_ov_fit, '--', color=OV_COLOR, label='OV fit', lw=2)
+ax1.semilogy(r_cm, bg_ov_fit, '-', color=OV_COLOR,
+             label='OV fit', lw=3, alpha=0.8)
+
+# Plot water theoretical central and uncertainty band
+ax1.semilogy(r_cm, br_central, '-', color=WATER_COLOR,
+             label='Water theory', lw=3, alpha=0.8)
+ax1.fill_between(r_cm, lower_w, upper_w, color=WATER_COLOR,
+                 alpha=0.3, label='Water uncertainty')
 
 # Plot MC data
-ax1.errorbar(r_mc, bg_mc, yerr=bg_mc_err, fmt='o', ms=6, capsize=4,
-             label='HFE MC', color=HFE_COLOR, markerfacecolor='white', markeredgecolor=HFE_COLOR)
-ax1.errorbar(iv_radii, iv_bgmc, yerr=iv_bgmc_err, fmt='s', ms=6, capsize=4,
-             label='IV MC', color=IV_COLOR, markerfacecolor='white', markeredgecolor=IV_COLOR)
-ax1.errorbar(ov_radii, ov_bgmc, yerr=ov_bgmc_err, fmt='^', ms=6, capsize=4,
-             label='OV MC', color=OV_COLOR, markerfacecolor='white', markeredgecolor=OV_COLOR)
+ax1.errorbar(r_mc, bg_mc, yerr=bg_mc_err,
+             fmt='o', ms=5, capsize=4, capthick=1,
+             label='HFE MC', color=HFE_COLOR,
+             markerfacecolor='white', markeredgecolor=HFE_COLOR,
+             markeredgewidth=1.5, elinewidth=1)
+ax1.errorbar(iv_radii, iv_bgmc, yerr=iv_bgmc_err,
+             fmt='s', ms=5, capsize=4, capthick=1,
+             label='IV MC', color=IV_COLOR,
+             markerfacecolor='white', markeredgecolor=IV_COLOR,
+             markeredgewidth=1.5, elinewidth=1)
+ax1.errorbar(ov_radii, ov_bgmc, yerr=ov_bgmc_err,
+             fmt='^', ms=5, capsize=4, capthick=1,
+             label='OV MC', color=OV_COLOR,
+             markerfacecolor='white', markeredgecolor=OV_COLOR,
+             markeredgewidth=1.5, elinewidth=1)
 
 # Axes styling
-ax1.set_xlabel('Inner vessel radius r (cm)')
-ax1.set_ylabel('Background (counts/yr)')
+ax1.set_xlabel('Inner vessel radius r (cm)', fontsize=14, fontweight='bold')
+ax1.set_ylabel('Background (counts/yr)',     fontsize=14, fontweight='bold')
 ax1.set_yscale('log')
-ax1.set_ylim(1e-6, 0.1)
-ax1.grid(which='both', linestyle='--', linewidth=0.5, alpha=0.7)
+ax1.set_ylim(1e-5, 0.1)
+ax1.grid(which='major', linestyle='-', linewidth=0.8, alpha=0.3)
+ax1.grid(which='minor', linestyle=':', linewidth=0.5, alpha=0.2)
 ax1.minorticks_on()
+ax1.tick_params(axis='both', which='major', labelsize=12)
 ax1.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-ax1.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+ax1.yaxis.set_major_formatter(LogFormatterSciNotation(base=10, labelOnlyBase=False))
 
 # Secondary axis: HFE mass
-ax2 = ax1.twinx()
+# ax2 = ax1.twinx()
+# iv_m = r_cm / 100.0
+# vol = (4/3) * np.pi * iv_m**3
+# hfe_vol = vol - VOL_OFFSET_M3
+# mass_hfe = hfe_vol * DENSITY_T_PER_M3 - HARDWARE_MASS_T
+# ax2.plot(r_cm, mass_hfe, ':', color=HFE_COLOR,
+#          label='HFE mass (t)', lw=2, alpha=0.7, zorder=0)
+# ax2.set_ylabel('HFE mass (t)', fontsize=14, fontweight='bold')
+# ax2.tick_params(axis='y', which='major', labelsize=12)
+# ax2.minorticks_on()
+
+# Legend
+lines1, labels1 = ax1.get_legend_handles_labels()
+# lines2, labels2 = ax2.get_legend_handles_labels()
+ax1.legend(lines1, labels1, ncol=2,
+           loc='upper left', fontsize=11, fancybox=True, shadow=True)
+
+plt.title('Cryostat, HFE, IV, OV & Water Background vs IV Radius',
+          fontsize=16, fontweight='bold', pad=20)
+plt.tight_layout()
+plt.show()
+
+# New figure for HFE mass vs IV radius
+fig2, ax_mass = plt.subplots(figsize=(13, 5))
 iv_m = r_cm / 100.0
 vol = (4/3) * np.pi * iv_m**3
 hfe_vol = vol - VOL_OFFSET_M3
 mass_hfe = hfe_vol * DENSITY_T_PER_M3 - HARDWARE_MASS_T
-ax2.plot(r_cm, mass_hfe, ':', color=HFE_COLOR, label='HFE mass (t)')
-ax2.set_ylabel('HFE mass (t)')
-ax2.minorticks_on()
-
-# Legend
-lines1, labels1 = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, labels1 + labels2, ncol=1, 
-           bbox_to_anchor=(1.15, 1), loc='upper left')
-
-plt.title('Cryostat & HFE Background vs IV Radius')
+ax_mass.plot(r_cm, mass_hfe, ':', color=HFE_COLOR, lw=2, alpha=0.7)
+ax_mass.set_xlabel('Inner vessel radius r (cm)', fontsize=14, fontweight='bold')
+ax_mass.set_ylabel('HFE mass (t)', fontsize=14, fontweight='bold')
+ax_mass.tick_params(axis='both', which='major', labelsize=12)
+ax_mass.minorticks_on()
+ax_mass.grid(which='major', linestyle='-', linewidth=0.8, alpha=0.3)
+ax_mass.grid(which='minor', linestyle=':', linewidth=0.5, alpha=0.2)
+plt.title('HFE Mass vs IV Radius', fontsize=16, fontweight='bold', pad=20)
 plt.tight_layout()
 plt.show()

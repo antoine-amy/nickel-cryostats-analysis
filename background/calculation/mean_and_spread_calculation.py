@@ -1,40 +1,27 @@
 #!/usr/bin/env python3
 """
 Background contribution and TG-spread calculation
-with automatic statistical efficiency errors.
+with optional statistical efficiency upper limits.
 
-Antoine Amy — June 2025
+Antoine Amy — Updated July 2025
 """
 import math
 
 SECONDS_PER_YEAR = 86400 * 365.25
 EPS = 1e-15
 
+USE_FULL_TG_FOR_ZERO_EFFICIENCY = False  # ⇦ Toggle this to switch behavior
 
-# ─── Helper: binomial 1 σ error on parent-level efficiency ────────────────
 def efficiency_error(mu: float, n_decays: int, branching: float = 1.0) -> float:
     """
-    σ = sqrt(mu * branching / N)
-
-    Parameters
-    ----------
-    mu : float
-        Efficiency per PARENT decay.
-    n_decays : int
-        Total number of parent decays simulated.
-    branching : float, optional
-        Branching ratio used to scale the conditional efficiency
-        back to parent-level, by default 1.0.
-
-    Returns
-    -------
-    float
-        1 σ statistical error on `mu`.
+    Return 1σ statistical error on efficiency per parent decay.
+    If mu = 0 and upper-limit mode is enabled, return one-sided 68% upper limit.
     """
-    return math.sqrt(mu * branching / n_decays)
+    if mu == 0.0:
+        return (1.14 * branching / n_decays) if USE_FULL_TG_FOR_ZERO_EFFICIENCY else 0.0
+    return math.sqrt(mu * n_decays * branching) / n_decays
 
 
-# ─── Core TG-spread machinery (unchanged) ─────────────────────────────────
 def calculate_bg_contribution(mass, activity, activity_err,
                               efficiency, efficiency_err):
     """Return (truncated mean, TG-spread) in counts / y / 2t / FWHM."""
@@ -94,31 +81,51 @@ def run_calculation(mass, component_list):
 # ─── Main block ───────────────────────────────────────────────────────────
 if __name__ == '__main__':
 
-    COMPONENT_MASS = 31_810.0  # kg
+    COMPONENT_MASS = 1681.6  # kg
 
     # Tuple layout:
-    # (name, activity [Bq/kg], activity_err,
-    #  efficiency μ, efficiency_err (None ⇒ statistical),
-    #  N_decays, branching)
-    components = [
+    # (name, activity [Bq/kg], activity_err, efficiency μ, efficiency_err (None ⇒ statistical), N_decays, branching)
+    water = [
 
-        # U-238 — γ comes directly from parent (branching = 1)
-        ('u238', 0.0, 3.233e-8,
-         1.770e-7, None,
-         1e10, 1.0),
+        # U-238 - (branching = 1)
+        ('u238', 7.6e-8, 1.3e-8, 0.0, None, 1e10, 1.0),
 
         # Th-232 — efficiency scaled by 208Tl γ branch (35.94 %)
-        ('th232', 0.0, 3.257e-9,
-         2.074e-7, None,
-         1e10, 0.3594),
+        ('th232', 3.1e-9, 0.9e-9, 3.59e-11, None, 1e10, 0.3594),
+
+        # Rn-222 — (branching = 1)
+        ('Rn-222', 6.3e-8, 2.2e-8, 0.0, None, 1e10, 1.0),
     ]
+
+    iv_BB25 = [
+
+        # Th-232 — efficiency scaled by 208Tl γ branch (35.94 %)
+        ('th232', 2.646e-7, 1.181e-7, 9.720e-9, None, 1e9, 0.3594),
+        
+        # U-238 - (branching = 1)
+        ('u238', 0.0, 7.43e-7, 9e-9, None, 1e9, 1.0),
+
+    ]
+
+    iv = [
+
+        # Th-232 — efficiency scaled by 208Tl γ branch (35.94 %)
+        ('th232', 2.65e-7, 1.09e-7, 2.19e-9, None, 1e10, 0.3594),
+        
+        # U-238 - (branching = 1)
+        ('u238', 0.0, 7.42e-7, 8.0e-10, None, 1e10, 1.0),
+
+    ]
+
+    components=iv
 
     # ---------- calculation ----------
     calc_results = run_calculation(COMPONENT_MASS, components)
 
     # ---------- nicely formatted output ----------
     print("\n--- Final Calculation Results (Excel TG-spread) ---")
-    print(f"Component mass: {COMPONENT_MASS:.1f} kg\n")
+    print(f"Component mass: {COMPONENT_MASS:.1f} kg")
+    print(f"Mode: {'TG-spread with 1σ UL for zero-efficiency' if USE_FULL_TG_FOR_ZERO_EFFICIENCY else 'Zero background if efficiency = 0'}\n")
 
     header = ("Isotope", "μ (efficiency)", "σ_μ (stat)",
               "⟨BG⟩ [cnt/y]", "± TG_spread")
@@ -127,8 +134,9 @@ if __name__ == '__main__':
     for comp in components:
         COMP_NAME = comp[0]
         res  = calc_results[COMP_NAME]
+        ul_tag = " (UL)" if res['mu'] == 0 and USE_FULL_TG_FOR_ZERO_EFFICIENCY else ""
         print(f"{COMP_NAME:<8s} {res['mu']:13.3e} {res['eff_err']:13.3e}"
-              f" {res['mean']:14.3e} {res['spread']:14.3e}")
+              f" {res['mean']:14.3e} {res['spread']:14.3e}{ul_tag}")
 
     total = calc_results['total']
     print("\nTotal background: "

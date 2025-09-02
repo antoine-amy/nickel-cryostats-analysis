@@ -1,122 +1,241 @@
+#!/usr/bin/env python3
+"""
+nEXO cryostat background vs HFE thickness
+with TG-spread uncertainties (truncated‐Gaussian)
+
+Antoine Amy — July 2025
+"""
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Constants
-R_IV0 = 1.410      # m, original inner-vessel radius
-H_IV0 = 2.820      # m, original inner-vessel height
-T_CYL_IV = 0.010   # m, inner vessel cylinder thickness
-T_SPH_IV = 0.005   # m, inner vessel cap thickness
+# ── Geometry & materials ─────────────────────────────────────────────────
+R_IV0, H_IV0, T_CYL_IV, T_CAP_IV = 1.410, 2.820, 0.010, 0.005   # m
+R_OV0, H_OV0, T_CYL_OV, T_CAP_OV = 1.540, 3.072, 0.020, 0.010   # m
+RHO_NI   = 8350        # kg·m⁻³
+MU_GAMMA = 0.007       # mm⁻¹
 
-R_OV0 = 1.54       # m, original outer-vessel radius
-H_OV0 = 3.072      # m, original outer-vessel height
-T_CYL_OV = 0.020   # m, outer vessel cylinder thickness
-T_SPH_OV = 0.010   # m, outer vessel cap thickness
+# ── Activities (mBq/kg) and their 1-σ errors ────────────────────────────
+ACT_Th232, ACT_Th232_ERR = 2.65e-4, 1.09e-4
+ACT_U238,  ACT_U238_ERR  = 0.0,     7.42e-4
 
-RHO_NI = 8350      # kg/m³, nickel density
+# ── Configuration ───────────────────────────────────────────────────────
+USE_AA_EFFICIENCIES = False  # Set to False to use BB efficiencies
 
-# Activities (mBq/kg)
-act_U238 = 0.00122   # mBq/kg
-act_Th232 = 0.000265 # mBq/kg
-
+# ── MC hit-efficiencies at reference shield (0.76 m sphere→cyl) ────────
 # Spherical hit-efficiencies at 76 cm HFE
-hit_sph = {
+hit_sph_BB = {
     'IV': {'Th232': 9.720e-9, 'U238': 9.0e-9},
     'OV': {'Th232': 7.2e-9,   'U238': 0.0}
 }
 
-# Transmission values
-trans_sph = 0.0013   # 0.13%
-trans_cyl = 0.0033   # 0.33%
+# --- my spherical hit efficiencies -------------------------------
+hit_sph_AA = {
+     'IV': {'Th232': 2.19234e-9, 'U238': 8.0e-10},
+     'OV': {'Th232': 1.2579e-9,  'U238': 2.0e-10}
+ }
 
-# Compute scaling from spherical → cylindrical baseline
-trans_scale = trans_cyl / trans_sph  # ≃ 2.538
+# Select which efficiency dataset to use
+hit_sph = hit_sph_AA if USE_AA_EFFICIENCIES else hit_sph_BB
 
-# Build your cylindrical-baseline efficiencies
-hit = {
-    'IV': {
-        'Th232': hit_sph['IV']['Th232'] * trans_scale,
-        'U238' : hit_sph['IV']['U238']  * trans_scale
-    },
-    'OV': {
-        'Th232': hit_sph['OV']['Th232'] * trans_scale,
-        'U238' : hit_sph['OV']['U238']  * trans_scale  # still zero
-    }
-}
+TRANS_SCALE = 0.0033 / 0.0013        # ≃2.538
 
-# Attenuation scaling parameter
-MU_GAMMA = 0.007  # mm⁻¹
+# ── Binomial σ on efficiency ─────────────────────────────────────────────
+def eff_sigma(mu, n_decays, branch=1.0):
+    σ = math.sqrt(mu * n_decays * branch) / n_decays
+    return σ
 
-# Baseline HFE thickness (m)
-original_hfe = 0.76
+N_DECAYS, BR_TL208 = 10_000_000_000, 0.3594
 
-# Budget limits (counts/year)
-budget_IV = 1.014e-3 + 1.241e-2
-budget_OV = 1.730e-3 + 1.994e-2
+# ── TG-spread helper (counts/sec → counts/yr) ───────────────────────────
+SECONDS_PER_YEAR = 365.25 * 86400.0
+EPS = 1e-15
 
-# Seconds per year
-sec_per_year = 365 * 24 * 3600
+def calculate_bg_contribution(mass, activity, activity_err,
+                              efficiency, efficiency_err):
+    """
+    Returns (mean_counts_per_year, TG_spread_per_year)
+    mass [kg], activity [Bq/kg], activity_err [Bq/kg],
+    efficiency [unitless], efficiency_err [unitless].
+    """
+    # instantaneous rate (counts/sec)
+    t = mass * activity * efficiency
+    # total 1-σ uncertainty in counts/sec
+    u = math.hypot(mass * efficiency * activity_err,
+                   mass * activity   * efficiency_err)
 
-# Sweep HFE thickness from 10 cm to 76 cm
-thickness = np.linspace(0.10, 0.76, 100)  # in meters
+    if u < EPS:
+        mean_yr = max(0.0, t) * SECONDS_PER_YEAR
+        return mean_yr, 0.0
 
-# Arrays to hold background counts/year
-bg_IV = np.zeros_like(thickness)
-bg_OV = np.zeros_like(thickness)
+    z   = t / u
+    pdf = math.exp(-0.5 * z*z) / math.sqrt(2.0 * math.pi)
+    cdf = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
 
-for i, t in enumerate(thickness):
-    delta = original_hfe - t
-    scale = np.exp(MU_GAMMA * delta * 1000)
+    # truncated mean in cnt/sec
+    mean_sec = t + u * (pdf / cdf) if cdf > EPS else 0.0
+    mean_sec = max(0.0, mean_sec)
 
-    # Compute IV mass
-    R_IV = R_IV0 - delta
-    H_IV = H_IV0 - 2*delta
-    V_side_IV = np.pi * ((R_IV + T_CYL_IV)**2 - R_IV**2) * H_IV
-    V_caps_IV = 2 * np.pi * R_IV**2 * T_SPH_IV
-    mass_IV = (V_side_IV + V_caps_IV) * RHO_NI
+    # TG-spread factor
+    term_b   = 1.0 + math.erf(z / math.sqrt(2.0))
+    a_over_b = (math.exp(-0.5 * z*z) / term_b) if term_b > EPS else 0.0
+    inner    = 1.0 - (z * a_over_b)/math.sqrt(8.0*math.pi) \
+                   - (a_over_b**2)/(8.0*math.pi)
+    spread_sec = u * math.sqrt(inner) if inner > 0 else 0.0
 
-    # Compute OV mass
-    R_OV = R_OV0 - delta
-    H_OV = H_OV0 - 2*delta
-    V_side_OV = np.pi * ((R_OV + T_CYL_OV)**2 - R_OV**2) * H_OV
-    V_caps_OV = 2 * np.pi * R_OV**2 * T_SPH_OV
-    mass_OV = (V_side_OV + V_caps_OV) * RHO_NI
+    # convert to counts/year
+    mean_yr   = mean_sec   * SECONDS_PER_YEAR
+    spread_yr = spread_sec * SECONDS_PER_YEAR
+    return mean_yr, spread_yr
 
-    # Decays per year
-    dec_IV_Th = mass_IV * act_Th232 * 1e-3 * sec_per_year
-    dec_IV_U  = mass_IV * act_U238  * 1e-3 * sec_per_year
-    dec_OV_Th = mass_OV * act_Th232 * 1e-3 * sec_per_year
-    dec_OV_U  = mass_OV * act_U238  * 1e-3 * sec_per_year
+# ── Reference budgets ───────────────────────────────────────────────────
+BUDGET_IV = 1.014e-3 + 1.241e-2
+BUDGET_OV = 1.730e-3 + 1.994e-2
 
-    # Apply scaled hit efficiencies
-    eff_IV_Th = hit['IV']['Th232'] * scale
-    eff_IV_U  = hit['IV']['U238']  * scale
-    eff_OV_Th = hit['OV']['Th232'] * scale
-    eff_OV_U  = hit['OV']['U238']  * scale
+# ── Shield-thickness grid ────────────────────────────────────────────────
+t0 = 0.76                     # m
+t_values = np.linspace(0.10, t0, 100)
 
-    # Total background
-    bg_IV[i] = dec_IV_Th * eff_IV_Th + dec_IV_U * eff_IV_U
-    bg_OV[i] = dec_OV_Th * eff_OV_Th + dec_OV_U * eff_OV_U
+# ── Output arrays ────────────────────────────────────────────────────────
+M_IV = np.zeros_like(t_values)
+M_OV = np.zeros_like(t_values)
+bg_IV,     bg_OV     = np.zeros_like(t_values), np.zeros_like(t_values)
+bg_IV_err, bg_OV_err = np.zeros_like(t_values), np.zeros_like(t_values)
 
-# Plotting
-plt.figure(figsize=(12,8))
-plt.plot(thickness * 100, bg_IV, color='tab:blue', label='Inner Vessel')
-plt.plot(thickness * 100, bg_OV, color='tab:red',  label='Outer Vessel')
+# ── Main loop ────────────────────────────────────────────────────────────
+for i, t in enumerate(t_values):
+    Δt = t0 - t
+    atten = math.exp(MU_GAMMA * Δt * 1000.0)
+
+    # masses
+    R_IV, H_IV = R_IV0 - Δt, H_IV0 - 2*Δt
+    V_IV_side = math.pi*((R_IV+T_CYL_IV)**2 - R_IV**2)*H_IV
+    V_IV_caps = 2*math.pi*R_IV**2 * T_CAP_IV
+    M_IV[i]   = (V_IV_side + V_IV_caps)*RHO_NI
+
+    R_OV, H_OV = R_OV0 - Δt, H_OV0 - 2*Δt
+    V_OV_side  = math.pi*((R_OV+T_CYL_OV)**2 - R_OV**2)*H_OV
+    V_OV_caps  = 2*math.pi*R_OV**2 * T_CAP_OV
+    M_OV[i]    = (V_OV_side + V_OV_caps)*RHO_NI
+
+    # scaled & attenuated efficiencies
+    μ_IV_Th = hit_sph['IV']['Th232'] * TRANS_SCALE * atten
+    μ_IV_U  = hit_sph['IV']['U238']  * TRANS_SCALE * atten
+    μ_OV_Th = hit_sph['OV']['Th232'] * TRANS_SCALE * atten
+    μ_OV_U  = hit_sph['OV']['U238']  * TRANS_SCALE * atten
+
+    σμ_IV_Th = eff_sigma(μ_IV_Th, N_DECAYS, BR_TL208)
+    σμ_IV_U  = eff_sigma(μ_IV_U,  N_DECAYS)
+    σμ_OV_Th = eff_sigma(μ_OV_Th, N_DECAYS, BR_TL208)
+    σμ_OV_U  = eff_sigma(μ_OV_U,  N_DECAYS)
+
+    # IV background + TG-spread
+    iv_mean_Th, iv_spread_Th = calculate_bg_contribution(
+         M_IV[i],
+         ACT_Th232*1e-3, ACT_Th232_ERR*1e-3,
+         μ_IV_Th, σμ_IV_Th
+    )
+    iv_mean_U, iv_spread_U   = calculate_bg_contribution(
+         M_IV[i],
+         ACT_U238*1e-3, ACT_U238_ERR*1e-3,
+         μ_IV_U, σμ_IV_U
+    )
+    bg_IV[i]     = iv_mean_Th + iv_mean_U
+    bg_IV_err[i] = math.hypot(iv_spread_Th, iv_spread_U)
+
+    # OV background + TG-spread
+    ov_mean_Th, ov_spread_Th = calculate_bg_contribution(
+         M_OV[i],
+         ACT_Th232*1e-3, ACT_Th232_ERR*1e-3,
+         μ_OV_Th, σμ_OV_Th
+    )
+    ov_mean_U, ov_spread_U   = calculate_bg_contribution(
+         M_OV[i],
+         ACT_U238*1e-3, ACT_U238_ERR*1e-3,
+         μ_OV_U, σμ_OV_U
+    )
+    bg_OV[i]     = ov_mean_Th + ov_mean_U
+    bg_OV_err[i] = math.hypot(ov_spread_Th, ov_spread_U)
+
+# ── Diagnostics ─────────────────────────────────────────────────────────
+def show(idx, lbl):
+    print(f"\n— {lbl} (t = {t_values[idx]*100:.1f} cm) —")
+    print(f"Inner-vessel mass : {M_IV[idx]:9.1f} kg")
+    print(f"Outer-vessel mass : {M_OV[idx]:9.1f} kg")
+    print(f"BG IV  : {bg_IV[idx]:.3e} ± {bg_IV_err[idx]:.3e} cnt/y")
+    print(f"BG OV  : {bg_OV[idx]:.3e} ± {bg_OV_err[idx]:.3e} cnt/y")
+
+def find_crossing_point(background_values, budget_value, thickness_values):
+    """
+    Find where background crosses budget using linear interpolation.
+    Returns the thickness where crossing occurs, or None if no crossing.
+    """
+    for i in range(len(background_values) - 1):
+        if (background_values[i] <= budget_value and background_values[i+1] >= budget_value) or \
+           (background_values[i] >= budget_value and background_values[i+1] <= budget_value):
+            # Linear interpolation
+            t1, t2 = thickness_values[i], thickness_values[i+1]
+            bg1, bg2 = background_values[i], background_values[i+1]
+            if bg2 != bg1:  # Avoid division by zero
+                crossing_thickness = t1 + (t2 - t1) * (budget_value - bg1) / (bg2 - bg1)
+                return crossing_thickness
+    return None
+
+show(0,   "Thinnest shield")   # 10 cm
+show(-1,  "Baseline shield")   # 76 cm
+
+# ── Find crossing points ─────────────────────────────────────────────────
+print("\n" + "="*60)
+print("BUDGET CROSSING ANALYSIS")
+print("="*60)
+
+# Find IV crossing
+iv_crossing = find_crossing_point(bg_IV, BUDGET_IV, t_values)
+if iv_crossing is not None:
+    print(f"IV background crosses budget at: {iv_crossing*100:.1f} cm HFE")
+else:
+    print("IV background does not cross budget in the range")
+
+# Find OV crossing
+ov_crossing = find_crossing_point(bg_OV, BUDGET_OV, t_values)
+if ov_crossing is not None:
+    print(f"OV background crosses budget at: {ov_crossing*100:.1f} cm HFE")
+else:
+    print("OV background does not cross budget in the range")
+
+# Find the limiting thickness (maximum of the two crossings)
+if iv_crossing is not None and ov_crossing is not None:
+    limiting_thickness = max(iv_crossing, ov_crossing)
+    print(f"\nLimiting thickness (both vessels): {limiting_thickness*100:.1f} cm HFE")
+elif iv_crossing is not None:
+    limiting_thickness = iv_crossing
+    print(f"\nLimiting thickness (IV only): {limiting_thickness*100:.1f} cm HFE")
+elif ov_crossing is not None:
+    limiting_thickness = ov_crossing
+    print(f"\nLimiting thickness (OV only): {limiting_thickness*100:.1f} cm HFE")
+else:
+    print("\nNo budget crossings found in the range")
+
+# ── Plot ────────────────────────────────────────────────────────────────
+plt.figure(figsize=(12, 8))
+plt.plot(t_values*100, bg_IV, color='tab:blue', label='Inner vessel')
+plt.plot(t_values*100, bg_OV, color='tab:red',  label='Outer vessel')
+
+plt.fill_between(t_values*100,
+                 bg_IV-bg_IV_err, bg_IV+bg_IV_err,
+                 color='tab:blue', alpha=0.30, linewidth=0)
+plt.fill_between(t_values*100,
+                 bg_OV-bg_OV_err, bg_OV+bg_OV_err,
+                 color='tab:red',  alpha=0.30, linewidth=0)
+
+plt.hlines(BUDGET_IV, 10, 76, colors='tab:blue', linestyles='--', label='IV budget')
+plt.hlines(BUDGET_OV, 10, 76, colors='tab:red',  linestyles='--', label='OV budget')
 
 plt.yscale('log')
-
-# Budget lines in matching colors
-plt.hlines(budget_IV, 10, 76, colors='tab:blue', linestyles='--', label='IV Budget')
-plt.hlines(budget_OV, 10, 76, colors='tab:red',  linestyles='--', label='OV Budget')
-
-plt.xlabel('HFE Thickness (cm)', fontsize=18)
-plt.ylabel('Background (counts/year)', fontsize=18)
-#plt.title('nEXO Cryostat Background vs. HFE Thickness')
-plt.legend(fontsize=16)
-plt.grid(True, which='both', ls='--')
-
-# Increase tick label sizes
-plt.xticks(fontsize=14)
-plt.yticks(fontsize=14)
-
+plt.xlabel('HFE shield thickness [cm]', fontsize=18)
+plt.ylabel('Background [counts yr⁻¹]',   fontsize=18)
+#plt.title('Cryostat γ-background vs HFE thickness', fontsize=18)
+plt.legend(fontsize=14)
+plt.grid(True, which='both', ls='--', alpha=0.6)
 plt.tight_layout()
 plt.show()

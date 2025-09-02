@@ -5,7 +5,7 @@ Compute HFE properties from a given inner‐vessel radius.
 import math
 
 # Constants
-DENSITY_T_PER_M3 = 1.72       # tonne per m³ of HFE
+DENSITY_T_PER_M3 = 1.73       # tonne per m³ of HFE
 VOL_OFFSET_M3    = 2.2 - 0.58 # m³ correction term
 PRICE_M_PER_TONNE = 2.2 / 32  # million USD per tonne of HFE
 
@@ -24,13 +24,13 @@ def summarize_from_radius(iv_radius_m):
     return {
         "iv_radius_m":          iv_radius_m,
         "hfe_volume_m3":        hfe_volume_m3,
-        "hfe_mass_tonnes":      hfe_mass_tonnes-0.240, # 0.240 t of HFE is lost to the environment, value from background budget for 1691mm IV
+        "hfe_mass_tonnes":      hfe_mass_tonnes-0.430, # 0.430 t of HFE is lost to the environment, value from background budget for 1691mm IV
         "hfe_price_millions":   hfe_price_millions,
     }
 
 def main():
     """Calculate and print HFE properties for IV radius = 1.1 m."""
-    radius = 1.1  # m
+    radius = 1.691  # m
     props = summarize_from_radius(radius)
     print(f"Inner‐vessel radius: {props['iv_radius_m']:.2f} m")
     print(f"HFE volume:         {props['hfe_volume_m3']:.2f} m³")

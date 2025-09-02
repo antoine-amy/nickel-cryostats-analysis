@@ -43,10 +43,10 @@ plt.rcParams.update({
 OUTSIDE_HFE = [
     "Cryopit concrete and shotcrete",
     "Outer Vessel Support",
-    "Outer Cryostat",  # Changed from "Outer Vessel"
+    "Outer Cryostat",
     "Inner Vessel Support",
     "Inner Cryostat MLI",
-    "Inner Cryostat",  # Changed from "Inner Vessel"
+    "Inner Cryostat",
     "CRE Transition Enclosures",
     "CRE Transition Boards",
     "PRE Transition Enclosures",

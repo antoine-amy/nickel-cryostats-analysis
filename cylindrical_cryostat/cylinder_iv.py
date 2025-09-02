@@ -13,13 +13,14 @@ import matplotlib.pyplot as plt
 # ── Constants ────────────────────────────────────────────────────────────────
 SEED = 45
 SAMPLE_SIZE = 100_000
-R_TPC = 638.5    # mm
-H_TPC = 1277.0   # mm
+R_TPC = 650 #638.5    # mm
+H_TPC = 1300 #1277.0   # mm
 R_CRYO = 1691.0   # mm
 RHO_HFE = 1_730.3  # kg/m³
 MU_GAMMA = 0.007    # mm⁻¹
 EXTRA_FIXED = 760.0 # mm
-EXTRA_FIXED_500 = 500.0 # mm
+EXTRA_FIXED_500 = 370.0 # mm
+VESSEL_THICKNESS = 5.0  # mm
 
 # ── Monte Carlo sampling of TPC surface points ───────────────────────────────
 def sample_tpc_surface(radius, height, n=SAMPLE_SIZE, shape='cyl'):
@@ -184,7 +185,7 @@ def effective_hfe_thickness(coords, cryo_radius, mu, shape='cyl'):
 # ── Volume & mass for spherical or cylindrical vessels ───────────────────────
 def vessel_hfe_mass(radius, height, extra, density, shape='cyl'):
     if shape == 'sph':
-        radius_vessel = extra
+        radius_vessel = extra - VESSEL_THICKNESS  # Use inner radius for vessel
         volume = 4/3*np.pi*radius_vessel**3 - np.pi*radius**2*height
     else:
         radius_vessel = radius + extra
@@ -258,7 +259,7 @@ if __name__ == '__main__':
     print(f"   HFE volume        = {v_cyl_fix/1e9:.3f} m³")
     print(f"   HFE mass          = {mass_cyl_fix/1000:.2f} t\n")
 
-    print("4) Cylindrical (fixed 500 mm):")
+    print("4) Cylindrical (fixed 370 mm):")
     print(f"   Inner radius      = {R_TPC + EXTRA_FIXED_500:.1f} mm")
     print(f"   Inner height      = {H_TPC + 2*EXTRA_FIXED_500:.1f} mm")
     print(f"   Min thickness     = {t_min_fix_500:.1f} mm")

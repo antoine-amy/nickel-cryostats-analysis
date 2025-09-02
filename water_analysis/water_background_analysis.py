@@ -1,64 +1,105 @@
 #!/usr/bin/env python3
-"""Analysis of water background radiation and hit efficiency calculations."""
+"""
+Analysis of U-238/Rn-222 and Th-232 water background:
+radial hit-efficiency profile with shaded error bands and log-scaled y-axis.
+"""
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
-from matplotlib.patches import Circle
 
 # Constants
-TANK_W, VESSEL_D = 12.3, 4.46  # Tank width and vessel diameter (m)
-RHO, RN, BR, SOLID = 1000, 9e-9, 0.01545, 0.5  # density, Rn activity, gamma BR, solid angle
-MU = 0.01  # combined attenuation coefficient
+TANK_SIZE = 12.3           # m
+VESSEL_DIAM = 4.46         # m
+RHO_WATER = 1000           # kg/m³
+MU_MASS = 0.01             # m²/kg
+EFF0_U = 2e-10             # counts/ROI/2 t/decay
+EFF0_TH = 1.2579e-9        # counts/ROI/2 t/decay
+BRANCHING_U = 1.0
+BRANCHING_TH = 0.3594
 
-R = VESSEL_D / 2
-BR_EFF = RN * BR * SOLID
+# Derived constant
+VESSEL_R = VESSEL_DIAM / 2  # m
 
-# 1) Heatmap slice at z=0
-N = 200
-x = np.linspace(-TANK_W/2, TANK_W/2, N)
-X, Y = np.meshgrid(x, x)
-d = np.sqrt(X**2 + Y**2) - R
-E = np.where(d > 0, BR_EFF * np.exp(-MU * RHO * d), np.nan)
 
-plt.figure(figsize=(9, 7))
-pc = plt.pcolormesh(X, Y, E, norm=LogNorm(), shading='auto')
-plt.gca().add_patch(Circle((0, 0), R, fill=False, color='r'))
-plt.colorbar(pc, label='Hit efficiency')
-plt.title('Hit efficiency slice at z=0 m')
-plt.xlabel('x (m)')
-plt.ylabel('y (m)')
-plt.tight_layout()
-plt.show()
+def main():
+    """Compute and plot radial hit-efficiency profiles with error bands."""
+    n_pts = 200
+    radii = np.linspace(VESSEL_R, TANK_SIZE / 2, n_pts)
 
-# 2) Radial dependence
-r = np.linspace(R, TANK_W/2, 500)
-d2 = r - R
-eff2 = BR_EFF * np.exp(-MU * RHO * d2)
-dr = r[1] - r[0]
-vol_shell = 4 * np.pi * r**2 * dr
-activity = vol_shell * RHO * RN * BR
-contrib = activity * eff2
-cum = np.cumsum(contrib)
-perc = cum / cum[-1] * 100
+    # geometry factor Ω/2π = 1 − sqrt(1 − (R/r)²)
+    ratio = VESSEL_R / radii
+    inside = np.clip(1.0 - ratio**2, 0.0, 1.0)
+    geom = 1.0 - np.sqrt(inside)
 
-fig, ax1 = plt.subplots()
-ax1.plot(r, eff2, 'b', label='Efficiency')
-ax1.set_xlabel('Radius (m)')
-ax1.set_ylabel('Efficiency', color='b')
+    # attenuation factor
+    dist = radii - VESSEL_R
+    attn = np.exp(-MU_MASS * RHO_WATER * dist)
 
-ax2 = ax1.twinx()
-ax2.plot(r, perc, 'r', label='Cumulative %')
-ax2.axhline(90, ls=':', color='k', label='90% threshold')
-ax2.set_ylabel('Cumulative contribution (%)', color='r')
+    # central hit efficiencies
+    eff_u = EFF0_U * geom * attn
+    eff_th = EFF0_TH * geom * attn
 
-lines1, labels1 = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax2.legend(lines1 + lines2, labels1 + labels2, loc='center right')
+    # error on EFF0
+    sigma_u = np.sqrt(EFF0_U * 1e10 * BRANCHING_U) / 1e10
+    sigma_th = np.sqrt(EFF0_TH * 1e10 * BRANCHING_TH) / 1e10
 
-plt.title('Radial profile')
-plt.tight_layout()
-plt.show()
+    # propagated error bands
+    err_u = sigma_u * geom * attn
+    err_th = sigma_th * geom * attn
 
-idx = np.searchsorted(perc, 90)
-print(f"90% of contrib within {d2[idx]:.2f} m of vessel")
+    # plot
+    fig, ax = plt.subplots(figsize=(10, 7))
+    line_u, = ax.plot(radii, eff_u, label='U-238 / Rn-222')
+    ax.fill_between(radii,
+                    eff_u - err_u,
+                    eff_u + err_u,
+                    color=line_u.get_color(),
+                    alpha=0.3)
+
+    line_th, = ax.plot(radii, eff_th, label='Th-232')
+    ax.fill_between(radii,
+                    eff_th - err_th,
+                    eff_th + err_th,
+                    color=line_th.get_color(),
+                    alpha=0.3)
+
+    ax.set_yscale('log')
+    ax.set_xlabel('Radius (m)')
+    ax.set_ylabel('Hit efficiency (counts/ROI/2 t/decay)')
+    ax.set_title('Radial hit-efficiency with shaded error bands')
+    ax.legend()
+    ax.grid(True, which='both', linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.show()
+
+    # 3D spherical integration for mean efficiency and 90% thickness
+    dr = radii[1] - radii[0]
+    shell_volumes = 4 * np.pi * radii**2 * dr
+    counts_shell = shell_volumes * geom * attn
+
+    mean_attn = np.sum(counts_shell) / np.sum(shell_volumes)
+    mean_eff_u = EFF0_U * mean_attn
+    mean_eff_th = EFF0_TH * mean_attn
+
+    print(
+        f'Mean hit efficiency (U-238 / Rn-222): '
+        f'{mean_eff_u:.2e} counts/ROI/2 t/decay'
+    )
+    print(
+        f'Mean hit efficiency (Th-232): '
+        f'{mean_eff_th:.2e} counts/ROI/2 t/decay'
+    )
+
+    cum = np.cumsum(counts_shell)
+    perc = cum / cum[-1] * 100.0
+    idx_90 = np.searchsorted(perc, 90.0)
+    thick_90 = dist[idx_90]
+
+    print(
+        f'90% of counts originate within {thick_90:.2f} m '
+        f'({thick_90*1000:.0f} mm) of vessel surface'
+    )
+
+
+if __name__ == '__main__':
+    main()

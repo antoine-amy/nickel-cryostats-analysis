@@ -95,3 +95,19 @@ plt.grid(True, which="minor", linestyle=":", alpha=0.2)
 # Adjust layout
 plt.tight_layout()
 plt.show()
+
+# Density of HFE-7000 in g/cm³
+density = 1.52
+
+# Find the index for 2.5 MeV
+idx_2_5MeV = np.where(abs(energy - 2.5) < 1e-10)[0][0]
+mu_mass = total[idx_2_5MeV]  # cm²/g
+
+# Linear attenuation coefficient in 1/cm
+mu_linear_cm = mu_mass * density
+
+# Convert to 1/mm
+mu_linear_mm = mu_linear_cm / 10
+
+print(f"Mass attenuation coefficient at 2.5 MeV: {mu_mass:.5f} cm²/g")
+print(f"Linear attenuation coefficient at 2.5 MeV: {mu_linear_mm:.5e} 1/mm")
