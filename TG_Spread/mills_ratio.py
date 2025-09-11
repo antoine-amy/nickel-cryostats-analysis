@@ -1,9 +1,16 @@
+"""
+Mills ratio visualization and demonstration.
+
+This module provides functions to visualize the Mills ratio and its
+geometric interpretation for truncated Gaussian distributions.
+"""
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 
 # helper function to shade tail and annotate lambda for a given z0
 def plot_lambda_demo(z0):
+    """Plot lambda demonstration for given z0."""
     x = np.linspace(-4, 4, 400)
     pdf = norm.pdf(x)
 
@@ -13,12 +20,10 @@ def plot_lambda_demo(z0):
     tail_mask = x >= z0
     plt.fill_between(x[tail_mask], pdf[tail_mask], alpha=0.3, label=r'Tail prob. $\;1-\Phi(z_0)$')
     plt.axvline(z0, linestyle='--', label=fr'$z_0={z0}$')
-    
     # annotate density value at z0
     fz = norm.pdf(z0)
     plt.scatter([z0], [fz], s=60)
     plt.text(z0+0.1, fz, r'$\phi(z_0)$', va='bottom')
-    
     # compute lambda
     lambda_z = fz / (1 - norm.cdf(z0))
     plt.text(z0+0.1, fz*0.5, fr'$\lambda = {lambda_z:.2f}$', va='top')

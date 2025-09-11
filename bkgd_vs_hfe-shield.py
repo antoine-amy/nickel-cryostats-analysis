@@ -21,8 +21,8 @@ R_TPC = 56.665   # cm radius
 H_TPC = 59.15    # cm half-height
 
 # IV and OV fit reference radii (mm)
-r0_iv = 1026
-r0_ov = 1026
+R0_IV = 1026
+R0_OV = 1026
 
 # HFE mass axis parameters
 DENSITY_T_PER_M3 = 1.72           # t/m³
@@ -61,17 +61,22 @@ B0_ERR  = 5.858e-05     # uncertainty on B0 (counts/yr)
 # Geometry helpers
 # ============================================================================
 def fsolid(r):
+    """Return geometric factor f_solid(r) for the cylindrical TPC geometry.
+
+    Caps at 0.5 to enforce physical limits of the model.
+    """
     r = np.asarray(r, float)
     f = np.zeros_like(r)
     mask = r >= R_TPC
     if np.any(mask):
         rm = r[mask]
         cap = 0.5 * (1 - np.sqrt(1 - (R_TPC/rm)**2))
-        bar = (R_TPC * (2*H_TPC)) / (4*np.pi*rm**2)
-        f[mask] = np.minimum(cap + bar, 0.5)
+        bar_fraction = (R_TPC * (2*H_TPC)) / (4*np.pi*rm**2)
+        f[mask] = np.minimum(cap + bar_fraction, 0.5)
     return f
 
 def fpath(r):
+    """Return effective path-length scaling vs radius in HFE."""
     d = np.clip(r - R_TPC, 0, None)
     return 1 + ((np.pi/2) - 1) * np.clip(d/H_TPC, 0, 1)
 
@@ -79,6 +84,7 @@ def fpath(r):
 # Analytic HFE background (geometry-corrected)
 # ============================================================================
 def bg_geometry(mu):
+    """Compute analytic HFE background vs radius for attenuation mu."""
     delta_r = np.clip(r_cm - R_TPC, 0, None)
     atten   = np.exp(-mu * fpath(r_cm) * delta_r)
     integrand = 4 * np.pi * r_cm**2 * fsolid(r_cm) * atten
@@ -100,12 +106,12 @@ print(f"Best-fit μ_HFE = {mu_best:.5f} cm⁻¹ "
 # Fit IV and OV with log-linear model
 # ============================================================================
 r_mm_iv = iv_radii * 10
-coef_iv = np.polyfit(r_mm_iv - r0_iv, np.log(iv_bgmc), 1)
+coef_iv = np.polyfit(r_mm_iv - R0_IV, np.log(iv_bgmc), 1)
 mu_iv_fit = -coef_iv[0]
 logA_iv   = coef_iv[1]
 
 r_mm_ov = ov_radii * 10
-coef_ov = np.polyfit(r_mm_ov - r0_ov, np.log(ov_bgmc), 1)
+coef_ov = np.polyfit(r_mm_ov - R0_OV, np.log(ov_bgmc), 1)
 mu_ov_fit = -coef_ov[0]
 logA_ov   = coef_ov[1]
 
@@ -139,17 +145,17 @@ fig, ax1 = plt.subplots(figsize=(13, 9))
 
 # Colors for components
 HFE_COLOR   = '#1f77b4'  # Blue
-IV_COLOR    = '#ff7f0e'  # Orange  
+IV_COLOR    = '#ff7f0e'  # Orange
 OV_COLOR    = '#2ca02c'  # Green
 WATER_COLOR = '#9467bd'  # Purple
 
 # Plot fits
 ax1.semilogy(r_cm, bg_geometry(mu_best), '-', color=HFE_COLOR,
              label='HFE fit', lw=3, alpha=0.8)
-bg_iv_fit = np.exp(logA_iv + coef_iv[0] * (r_cm*10 - r0_iv))
+bg_iv_fit = np.exp(logA_iv + coef_iv[0] * (r_cm*10 - R0_IV))
 ax1.semilogy(r_cm, bg_iv_fit, '-', color=IV_COLOR,
              label='IV fit', lw=3, alpha=0.8)
-bg_ov_fit = np.exp(logA_ov + coef_ov[0] * (r_cm*10 - r0_ov))
+bg_ov_fit = np.exp(logA_ov + coef_ov[0] * (r_cm*10 - R0_OV))
 ax1.semilogy(r_cm, bg_ov_fit, '-', color=OV_COLOR,
              label='OV fit', lw=3, alpha=0.8)
 

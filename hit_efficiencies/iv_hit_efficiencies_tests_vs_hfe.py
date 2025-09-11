@@ -1,3 +1,9 @@
+"""Plot and fit IV hit efficiencies versus inner-vessel radius.
+
+Includes uncertainty bars and an exponential attenuation fit to June 2025 data
+for Th232 and U238, plus a combined coefficient.
+"""
+
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import curve_fit
@@ -67,10 +73,11 @@ u238_info = {
 }
 
 def compute_error(eff, ng, br):
-    # Poisson-based uncertainty on counts = eff·ng·br
+    """Return Poisson-based uncertainty on counts = eff * ng * br."""
     return np.sqrt(eff * br / ng) if eff > 0 else 1.0 / ng
 
 def plot_with_errors(ax, data_info, nuc_label):
+    """Plot efficiency points with error bars on the given axes."""
     for label, points in data_info.items():
         xs = sorted(points.keys())
         ys = [points[x]['eff'] for x in xs]
@@ -86,8 +93,9 @@ def plot_with_errors(ax, data_info, nuc_label):
     ax.grid(True, which='both', linestyle='--', linewidth=0.5)
 
 # Attenuation model: I(r) = I0 * exp(-mu * r)
-def attenuation_model(r, I0, mu):
-    return I0 * np.exp(-mu * r)
+def attenuation_model(r, i0, mu):
+    """Exponential attenuation model I(r) = I0 * exp(-mu * r)."""
+    return i0 * np.exp(-mu * r)
 
 # ——— Plotting ———
 fig, axs = plt.subplots(1, 2, figsize=(16, 5), sharey=True)
@@ -98,15 +106,17 @@ plt.show()
 
 # ——— Fit Jun. 2025 data and print μ with error ———
 def fit_attenuation(data_info, nuc_label):
+    """Fit attenuation model to a dataset and print mu ± sigma_mu."""
     pts = data_info['Jun. 2025 Results']
     xs = np.array(sorted(pts.keys()))
     ys = np.array([pts[x]['eff'] for x in xs])
     errs = np.array([compute_error(pts[x]['eff'], pts[x]['ng'], BR[nuc_label]) for x in xs])
     # initial guess: I0≈first point, μ≈1e-3
     p0 = [ys[0], 1e-3]
-    popt, pcov = curve_fit(attenuation_model, xs, ys,
-                           sigma=errs, absolute_sigma=True, p0=p0)
-    I0, mu = popt
+    result = curve_fit(attenuation_model, xs, ys,
+                       sigma=errs, absolute_sigma=True, p0=p0)
+    popt, pcov = result[0], result[1]
+    _i0, mu = popt
     mu_err = np.sqrt(pcov[1, 1])
     print(f"{nuc_label} attenuation μ = {mu:.3e} ± {mu_err:.3e} mm⁻¹")
     return mu, mu_err

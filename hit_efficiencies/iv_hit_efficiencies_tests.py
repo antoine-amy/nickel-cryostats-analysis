@@ -54,11 +54,11 @@ plot_labels = budget_labels + result_labels
 
 # ─── Error computation ─────────────────────────────────────────────────────────
 def compute_errors(means_dict: dict) -> dict:
+    """Compute Poisson-based errors with branching ratio correction for all configurations."""
     error_dict = {}
     for config_label, vals in means_dict.items():
         # Choose NG based on configuration type
         ng = NG_BUDGET if 'Budget' in config_label else NG_SIM
-        
         # Poisson-based errors with branching ratio correction for all configurations
         errs = {}
         for isotope, eff in vals.items():
@@ -80,6 +80,7 @@ errors = compute_errors(means)
 part_colors = {'Upper': 'red', 'Lower': 'green', 'Lip': 'blue', 'All': 'black'}
 
 def pick_color(config_label: str) -> str:
+    """Pick color based on configuration type (Upper/Lower/Lip/All parts)."""
     if ('Budget' in config_label or
         'Lip/Lower/Upper' in config_label or
         'Lower/Lip/Upper' in config_label):
@@ -141,7 +142,6 @@ for label in plot_labels:
     th_err = errors[label]['Th-232'] * SCALE
     u_val = means[label]['U-238'] * SCALE
     u_err = errors[label]['U-238'] * SCALE
-    
     print(f"{label:<35s} {th_val:10.3e} {th_err:10.3e} {u_val:10.3e} {u_err:10.3e}")
 
 print("="*80)
