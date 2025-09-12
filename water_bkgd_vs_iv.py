@@ -14,8 +14,8 @@ def main():
     MU = 0.00685         # attenuation coefficient (1/mm)
     MU_ERR = 0.0005      # uncertainty in MU
     R0 = 1691.0          # reference radius (mm)
-    B0 = 7.391e-05       # central background (counts/year)
-    B0_ERR = 5.858e-05   # uncertainty on B0
+    B0 = 5.450e-05       # central background (counts/year)
+    B0_ERR = 4.390e-05   # uncertainty on B0
 
     # Shielding thickness array (mm)
     r = np.linspace(1000.0, 1700.0, 100)
@@ -34,19 +34,23 @@ def main():
     upper = np.maximum(br_up_mu, br_up_b0)
     lower = np.minimum(br_dn_mu, br_dn_b0)
 
+    # Monte Carlo data points
+    mc_r = [1026.0, 1691.0]  # mm
+    mc_bg = [6.14e-6, 1.23e-6]  # counts/year
+    mc_err = [1.22e-2, 4.98e-4]  # counts/year
+
     # Plotting
     fig, ax = plt.subplots()
-    ax.plot(r, br, color='C0', label='Central B(r)')
-    ax.fill_between(r, br_dn_mu, br_up_mu, color='C0', alpha=0.3,
-                    label='μ uncertainty')
-    ax.fill_between(r, br_dn_b0, br_up_b0, color='C1', alpha=0.3,
-                    label='B₀ uncertainty')
-    ax.fill_between(r, lower, upper, color='gray', alpha=0.2,
-                    label='Total uncertainty')
+    ax.plot(r, br, label='Theoretical B(r)')
+    ax.fill_between(r, lower, upper, alpha=0.3,
+                    label='Theoretical uncertainty')
+    ax.errorbar(mc_r, mc_bg, yerr=mc_err, fmt='o', color='red', 
+                capsize=5, label='Monte Carlo data')
 
     ax.set_xlabel('Shielding thickness r (mm)')
     ax.set_ylabel('Background (counts/year)')
     ax.set_title('Background vs. HFE Shielding Thickness')
+    ax.set_yscale('log')
     ax.legend(loc='upper right')
     ax.grid(True)
     plt.tight_layout()

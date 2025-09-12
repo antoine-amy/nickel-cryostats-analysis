@@ -63,8 +63,8 @@ def main():
     water_mass = 1_747_092.874453
 
     # Mean hit efficiencies (counts/decay)
-    eff_u_rn = 1.22e-12
-    eff_th = 7.68e-12
+    eff_u_rn = 6.831e-13
+    eff_th = 4.296e-12
 
     # Compute efficiency errors assuming N_decays = 1e10
     N_DECAYS = 1e10
