@@ -26,7 +26,7 @@ def load_data(filepath):
     """Load data from Excel file and return processed DataFrame."""
     data_df = pd.read_excel(filepath, sheet_name="Summary", header=None)
     # find header row
-    for i, row in data_df.iterrows():
+    for i, (_, row) in enumerate(data_df.iterrows()):
         vals = [str(v).strip().lower() for v in row.values]
         if all(h in vals for h in ["component", "iv radius (mm)", "background", "error"]):
             data_df = data_df.iloc[i+1:, :4].copy()
@@ -160,8 +160,8 @@ for comp in ["HFE", "IV", "OV", "Water", "Water (theoretical)"]:
         fit_curves[comp] = curve_data
         print(f"{comp}: μ = {mu_coeff:.4f} 1/mm")
 
-# --- Plot (12×9) ---
-fig, ax = plt.subplots(figsize=(12, 9))
+# --- Plot ---
+fig, ax = plt.subplots(figsize=(12, 8))
 
 # data points (legend shows only these)
 for comp in comps_order:
