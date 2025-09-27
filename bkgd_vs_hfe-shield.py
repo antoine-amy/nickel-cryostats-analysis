@@ -54,8 +54,8 @@ ov_bgmc_err = np.array([3.43e-3, 1.00e-3, 1.73e-4, 3.98e-5])
 MU_W    = 0.00611       # attenuation coeff. in water (1/mm)
 MU_W_ERR= 0.0005        # uncertainty in MU_W (1/mm)
 R0_W    = 1691.0        # reference radius (mm)
-B0      = 7.391e-05     # mean water background at R0 (counts/yr)
-B0_ERR  = 5.858e-05     # uncertainty on B0 (counts/yr)
+B0      = 5.450e-05     # mean water background at R0 (counts/yr)
+B0_ERR  = 4.390e-05     # uncertainty on B0 (counts/yr)
 
 # ============================================================================
 # Geometry helpers
