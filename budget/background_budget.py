@@ -160,7 +160,7 @@ def main():
     )
     parser.add_argument(
         "--input_file",
-        default="background/Summary_D-047_v86_250113-233135_2025-02-21.xlsx",
+        default="budget/Summary_D-047_v86_250113-233135_2025-09-11.xlsx",
         help="Path to input Excel file",
     )
     parser.add_argument(
@@ -248,7 +248,7 @@ def main():
 
     # Produce the plot grouped by Component using direct background counts
     output_file = (
-        out_folder /"background"/ f"BackgroundBudget_Intrinsic_ByComponent_{table}_2tonne.pdf"
+        out_folder /"budget"/ f"BackgroundBudget_Intrinsic_ByComponent_{table}_2tonne.pdf"
     )
     make_plot(
         df_intrinsic,
