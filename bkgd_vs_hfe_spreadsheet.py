@@ -1,55 +1,50 @@
 #!/usr/bin/env python3
 """
-Background vs IV radius analysis from 'Summary' sheet.
+Background vs IV radius analysis from 'Summary' sheet, with confidence bands.
 
+• HFE (no Rn-222): analytic geometry-based model (explicit 4π r^2 and
+  f_solid(r) = 0.5 * (R_TPC / r)^2), NO path-length multiplier.
+  We fit normalization C and attenuation μ, and propagate their covariance.
+
+• Others (HFE, IV, OV, Water, Water (theoretical)):
+  y(r) = A * exp(k r). We fit A,k with weights from the y-errors,
+  then compute bands via the delta method.
+
+Bands shown are for the MEAN fit (confidence bands). For ~95% bands, set Z_BAND=1.96.
 """
 
 import numpy as np
 import pandas as pd
-import matplotlib as mpl
 import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
 
-# --- Config ---------------------------------------------------------------
+# --- Config ---
 XLSX_PATH = ("/Users/antoine/My Drive/Documents/Thèse/Nickel Cryostats/"
              "nickel-cryostats-analysis/budget/bkgd_vs_hfe-shield.xlsx")
 R_GRID = np.linspace(950, 1800, 600)  # mm
 
 # TPC geometry for analytic model (cm)
 R_TPC = 56.665
-H_TPC = 59.15
+H_TPC = 59.15  # unused in analytic model (kept for reference)
 
-# --- Plot style -----------------------------------------------------------
-mpl.rcParams.update({
-    "figure.dpi": 160,
-    "savefig.dpi": 300,
-    "axes.spines.top": True,
-    "axes.spines.right": True,
-    "axes.linewidth": 0.8,
-    "xtick.direction": "in",
-    "ytick.direction": "in",
-    "xtick.minor.visible": True,
-    "ytick.minor.visible": True,
-    "xtick.major.size": 6,
-    "xtick.minor.size": 3,
-    "ytick.major.size": 6,
-    "ytick.minor.size": 3,
-    "font.size": 12,
-    "legend.frameon": True,
-})
+Z_BAND = 1.0  # 1σ confidence band; set 1.96 for ~95%
 
-# --- Data I/O -------------------------------------------------------------
+# ---------- Data loading ----------
 def load_data(filepath):
     """Load data from Excel file and return processed DataFrame."""
-    data_frame = pd.read_excel(filepath, sheet_name="Summary", header=None)
-    for i, (_, row) in enumerate(data_frame.iterrows()):
+    data_df = pd.read_excel(filepath, sheet_name="Summary", header=None)
+    # find header row
+    for i, (_, row) in enumerate(data_df.iterrows()):
         vals = [str(v).strip().lower() for v in row.values]
         if all(h in vals for h in ["component", "iv radius (mm)", "background", "error"]):
-            data_frame = data_frame.iloc[i+1:, :4].copy()
-            data_frame.columns = ["Component", "r_mm", "y", "e"]
+            data_df = data_df.iloc[i+1:, :4].copy()
+            data_df.columns = ["Component", "r_mm", "y", "e"]
             break
-    data_frame["Component"] = data_frame["Component"].ffill().astype(str).str.strip()
-    for column in ["r_mm", "y", "e"]:
-        data_frame[column] = pd.to_numeric(data_frame[column], errors="coerce")
+
+    data_df["Component"] = data_df["Component"].ffill().astype(str).str.strip()
+    for col in ["r_mm", "y", "e"]:
+        data_df[col] = pd.to_numeric(data_df[col], errors="coerce")
+
     mapping = {
         "hfe (no rn-222)": "HFE (no Rn-222)",
         "hfe": "HFE",
@@ -58,202 +53,169 @@ def load_data(filepath):
         "water": "Water",
         "water (theoretical)": "Water (theoretical)",
     }
-    data_frame["Component"] = (data_frame["Component"].str.lower()
-                               .map(mapping).fillna(data_frame["Component"]))
-    return data_frame.dropna(subset=["r_mm", "y"]).reset_index(drop=True)
+    data_df["Component"] = (data_df["Component"].str.lower()
+                           .map(mapping).fillna(data_df["Component"]))
+    return data_df.dropna(subset=["r_mm", "y"]).reset_index(drop=True)
 
-# --- Fitting utilities ---
-def fit_exp_curve(radius, y_vals, errors, relerr_floor=1e-3):
-    """
-    Fit y = A * exp(k r) in log-space with WLS:
-      ln y = b0 + b1 r, weights = 1/σ_ln^2 with σ_ln ≈ e/y.
-    Computes σ_ln inline (previously _safe_rel_err).
-    Returns (mu, y_fit_grid) with μ = -k in 1/mm.
-    """
-    radius = np.asarray(radius, float)
-    y_vals = np.asarray(y_vals, float)
-    errors = np.asarray(errors, float)
-
-    # Inline relative errors for log-space weighting (σ_ln ≈ e / y)
-    sigma_rel = np.full_like(y_vals, relerr_floor, dtype=float)
-    mask0 = (y_vals > 0) & np.isfinite(y_vals)
-    sigma_rel[mask0] = np.maximum(errors[mask0] / y_vals[mask0], relerr_floor)
-
-    mask = mask0 & np.isfinite(radius) & np.isfinite(y_vals)
-    if mask.sum() < 2:
+def _safe_sigma(e: np.ndarray):
+    """Return sigma array for curve_fit; if all zeros/NaN, return None (unweighted)."""
+    e = np.asarray(e, float)
+    ok = np.isfinite(e) & (e > 0)
+    if not np.any(ok):
         return None
+    min_pos = np.nanmin(e[ok])
+    return np.where((~np.isfinite(e)) | (e <= 0), min_pos, e)
 
-    radius_masked = radius[mask]
-    ln_y_vals = np.log(y_vals[mask])
-    weights = 1.0 / (sigma_rel[mask] ** 2)
-
-    # Weighted normal equations without building a big diagonal matrix
-    design_matrix = np.vstack([np.ones_like(radius_masked), radius_masked]).T
-    weighted_design = design_matrix * weights[:, None]
-    normal_matrix = design_matrix.T @ weighted_design
-    normal_vector = design_matrix.T @ (weights * ln_y_vals)
-    b0, b1 = np.linalg.solve(normal_matrix, normal_vector)
-
-    mu = -b1
-    y_fit = np.exp(b0 + b1 * R_GRID)
-    return mu, y_fit
-
-# --- Analytic HFE (single function) ---------------------------------------
-def analytic_hfe_curve(radius_mm, y_vals, errors, mu_min=0.02, mu_max=0.5, n_mu=2000):
-    """
-    Single-entry analytic HFE fitter:
-      - builds the cumulative model with explicit 4π r^2 and f_solid = 0.5*(R_TPC/r)^2
-        (no path-length factor beyond exp(-μ Δr));
-      - scans μ in [mu_min, mu_max] (cm^-1);
-      - for each μ, computes the optimal normalization C(μ) by weighted least squares
-        at the data points; evaluates χ²(μ);
-      - returns best μ (in 1/mm) and the best-fit curve on R_GRID (in counts/yr units).
-
-    Inputs are data radii radius_mm (mm), y_vals (counts/yr), errors (errors in counts/yr).
-    """
-    radius_mm = np.asarray(radius_mm, float)
-    y_vals = np.asarray(y_vals, float)
-    errors = np.asarray(errors, float)
-
-    mask = np.isfinite(radius_mm) & np.isfinite(y_vals) & (y_vals > 0)
-    if mask.sum() < 2:
-        return None
-
-    # Grids in cm
-    r_cm_grid = R_GRID / 10.0
-    r_cm_pts = radius_mm[mask] / 10.0
-    y_pts = y_vals[mask]
-    # small floor for weights to avoid division by zero
-    e_pts = np.where((errors[mask] > 0) & np.isfinite(errors[mask]),
-                     errors[mask], 0.01 * y_vals[mask])
-
-    mu_space = np.linspace(mu_min, mu_max, n_mu)  # cm^-1
-    best_chi2 = np.inf
-    best_mu_cm = None
-    best_normalization = None
-
-    # Precompute static geometric factors on the grid
-    f_solid_grid = np.where(r_cm_grid >= R_TPC, 0.5 * (R_TPC / r_cm_grid) ** 2, 0.0)
+# ---------- Analytic HFE(no Rn-222) model ----------
+def _analytic_F_on_grid(mu_mm_inv, r_grid_mm=R_GRID):
+    """Unnormalized cumulative shape F(r; μ) on R_GRID (mm); model uses cm internally."""
+    r_cm_grid = r_grid_mm / 10.0
+    mu_cm_inv = mu_mm_inv * 10.0  # mm^-1 -> cm^-1
+    f_solid = np.where(r_cm_grid >= R_TPC, 0.5 * (R_TPC / r_cm_grid)**2, 0.0)
+    dist = np.maximum(r_cm_grid - R_TPC, 0.0)
+    atten = np.exp(-mu_cm_inv * dist)
+    integrand = 4.0 * np.pi * (r_cm_grid**2) * f_solid * atten
     dr = r_cm_grid[1] - r_cm_grid[0]
+    F = np.cumsum(integrand) * dr
+    return F
 
-    for mu_cm in mu_space:
-        # build cumulative shape on grid (unnormalized)
-        dist_grid = np.maximum(r_cm_grid - R_TPC, 0.0)
-        atten_grid = np.exp(-mu_cm * dist_grid)
-        integrand = 4.0 * np.pi * (r_cm_grid ** 2) * f_solid_grid * atten_grid
-        model_grid = np.cumsum(integrand) * dr  # shape vs r on R_GRID
-
-        # interpolate to the data radii
-        model_at_pts = np.interp(r_cm_pts, r_cm_grid, model_grid)
-
-        # optimal normalization C(μ): minimize Σ ((C m_i - y_i)/σ_i)^2
-        weights = 1.0 / (e_pts**2)
-        numerator = np.sum(weights * model_at_pts * y_pts)
-        denominator = np.sum(weights * model_at_pts * model_at_pts)
-        if denominator <= 0 or not np.isfinite(denominator):
-            continue
-        normalization = numerator / denominator
-
-        residuals = (normalization * model_at_pts - y_pts) / e_pts
-        chi2 = np.sum(residuals**2)
-
-        if chi2 < best_chi2:
-            best_chi2 = chi2
-            best_mu_cm = mu_cm
-            best_normalization = normalization
-            best_model_grid = model_grid  # keep the unscaled shape
-
-    if best_mu_cm is None:
+def fit_hfe_no_rn_with_bands(r_mm, y, e, xgrid=R_GRID, z=Z_BAND):
+    r_mm = np.asarray(r_mm, float); y = np.asarray(y, float); e = np.asarray(e, float)
+    mask = np.isfinite(r_mm) & np.isfinite(y)
+    r_fit, y_fit, e_fit = r_mm[mask], y[mask], e[mask]
+    if r_fit.size < 2:
         return None
 
-    # Best-fit curve on the plotting grid
-    if best_model_grid is None:
-        return None
-    y_fit_grid = best_normalization * best_model_grid
-    mu_best_mm = best_mu_cm / 10.0  # convert cm^-1 → mm^-1
-    return mu_best_mm, y_fit_grid
+    def model(r_mm, C, mu_mm):
+        F = _analytic_F_on_grid(mu_mm)             # on base grid
+        return C * np.interp(r_mm, R_GRID, F)      # interp to requested r
 
-# --- Main ---------------------------------------------------------------
-data_frame = load_data(XLSX_PATH)
+    # p0: quick guess
+    mu0 = 0.01  # 1/mm
+    F0 = _analytic_F_on_grid(mu0)
+    C0 = (y_fit[-1] / np.interp(r_fit[-1], R_GRID, F0)) if F0[-1] > 0 else 1.0
+    p0 = (float(C0), float(mu0))
+
+    sigma = _safe_sigma(e_fit)
+    popt, pcov = curve_fit(model, r_fit, y_fit, p0=p0, sigma=sigma,
+                           absolute_sigma=True, maxfev=20000)
+    C, mu = popt
+
+    F_grid = _analytic_F_on_grid(mu)
+    curve = C * F_grid
+
+    # Jacobian wrt [C, μ] on xgrid: ∂y/∂C = F ; ∂y/∂μ = C * ∂F/∂μ
+    h = max(1e-6, 1e-6 * abs(mu))
+    dF_dmu = (_analytic_F_on_grid(mu + h) - _analytic_F_on_grid(mu - h)) / (2.0 * h)
+
+    Jc = F_grid
+    Jm = C * dF_dmu
+    var = (pcov[0, 0] * Jc**2 + 2.0 * pcov[0, 1] * Jc * Jm + pcov[1, 1] * Jm**2)
+    se = np.sqrt(np.maximum(var, 0.0))
+    lo = np.clip(curve - z * se, 1e-300, np.inf)
+    hi = curve + z * se
+
+    return {"params": (C, mu), "cov": pcov, "curve": curve, "lo": lo, "hi": hi}
+
+# ---------- Exponential y = A * exp(k r) for others ----------
+def fit_attenuation_with_bands(r, y, e, xgrid=R_GRID, z=Z_BAND):
+    r = np.asarray(r, float); y = np.asarray(y, float); e = np.asarray(e, float)
+    mask = np.isfinite(r) & np.isfinite(y) & (y > 0)
+    if mask.sum() < 2:
+        return None
+
+    r_fit, y_fit, e_fit = r[mask], y[mask], e[mask]
+    # initial guess via log-linear
+    k0, lnA0 = np.polyfit(r_fit, np.log(y_fit), 1)
+    p0 = (float(np.exp(lnA0)), float(k0))
+
+    def f(x, A, k):
+        return A * np.exp(k * x)
+
+    sigma = _safe_sigma(e_fit)
+    popt, pcov = curve_fit(f, r_fit, y_fit, p0=p0, sigma=sigma,
+                           absolute_sigma=True, maxfev=10000)
+    A, k = popt
+    y_grid = f(xgrid, A, k)
+
+    # Jacobian wrt [A, k]
+    J0 = np.exp(k * xgrid)                 # ∂y/∂A
+    J1 = A * xgrid * np.exp(k * xgrid)     # ∂y/∂k
+    var = (pcov[0, 0] * J0**2 + 2.0 * pcov[0, 1] * J0 * J1 + pcov[1, 1] * J1**2)
+    se = np.sqrt(np.maximum(var, 0.0))
+    lo = np.clip(y_grid - z * se, 1e-300, np.inf)
+    hi = y_grid + z * se
+
+    return {"params": (A, k), "cov": pcov, "curve": y_grid, "lo": lo, "hi": hi, "mu": -k}
+
+# ---------- Main ----------
+df = load_data(XLSX_PATH)
 
 series = {}
-for comp in data_frame["Component"].unique():
-    d = data_frame[data_frame["Component"] == comp]
-    series[comp] = {"r": d["r_mm"].to_numpy(),
-                    "y": d["y"].to_numpy(),
-                    "e": d["e"].fillna(0).to_numpy()}
+for comp in df["Component"].unique():
+    d = df[df["Component"] == comp]
+    series[comp] = {
+        "r": d["r_mm"].to_numpy(),
+        "y": d["y"].to_numpy(),
+        "e": d["e"].fillna(0).to_numpy(),
+    }
 
-comps_order = [c for c in ["HFE (no Rn-222)", "HFE", "IV", "OV", "Water", "Water (theoretical)"]
-               if c in series]
-palette = plt.get_cmap("tab10").colors
-markers = ["o", "s", "^", "D", "P", "v", "X"]
-color_map = {c: palette[i % len(palette)] for i, c in enumerate(comps_order)}
-marker_map = {c: markers[i % len(markers)] for i, c in enumerate(comps_order)}
+comps_order = [c for c in ["HFE (no Rn-222)", "HFE", "IV", "OV", "Water", "Water (theoretical)"] if c in series]
+default_colors = plt.rcParams['axes.prop_cycle'].by_key().get('color', [])
+color_map = {comp: default_colors[i % len(default_colors)] for i, comp in enumerate(comps_order)}
 
-fit_results = {}
+fit_curves, bands, mus = {}, {}, {}
 
-# Analytic HFE
+# HFE (no Rn-222): analytic fit + band
 if "HFE (no Rn-222)" in series:
     d = series["HFE (no Rn-222)"]
-    res = analytic_hfe_curve(d["r"], d["y"], d["e"])
+    res = fit_hfe_no_rn_with_bands(d["r"], d["y"], d["e"])
     if res is not None:
-        mu_mm, y_fit = res
-        fit_results["HFE (no Rn-222)"] = {"mu": mu_mm, "y_fit": y_fit}
+        C, mu_mm = res["params"]
+        fit_curves["HFE (no Rn-222)"] = res["curve"]
+        bands["HFE (no Rn-222)"] = (res["lo"], res["hi"])
+        mus["HFE (no Rn-222)"] = mu_mm
+        print(f"HFE (no Rn-222): μ = {mu_mm:.4f} 1/mm, C = {C:.3g}")
 
-# Exponentials (skip Water MC)
+# Others: exponential fit + band
 for comp in ["HFE", "IV", "OV", "Water (theoretical)"]:
     if comp in series:
-        radius = series[comp]["r"]
-        y_vals = series[comp]["y"]
-        errors = series[comp]["e"]
-        res = fit_exp_curve(radius, y_vals, errors)
-        if res is not None:
-            mu, y_fit = res
-            fit_results[comp] = {"mu": mu, "y_fit": y_fit}
+        d = series[comp]
+        res = fit_attenuation_with_bands(d["r"], d["y"], d["e"])
+        if res is None:
+            continue
+        A, k = res["params"]; mu = -k
+        fit_curves[comp] = res["curve"]
+        bands[comp] = (res["lo"], res["hi"])
+        mus[comp] = mu
+        print(f"{comp}: μ = {mu:.4f} 1/mm (A = {A:.3g}, k = {k:.4g})")
 
-# --- Plot ---------------------------------------------------------------
-fig, ax = plt.subplots(figsize=(7.0, 4.8), constrained_layout=True)
+# ---------- Plot ----------
+fig, ax = plt.subplots(figsize=(12, 8))
 
-# Data points
+# data points with error bars (legend shows only these)
 for comp in comps_order:
     d = series[comp]
-    ax.errorbar(
-        d["r"], d["y"], yerr=d["e"],
-        fmt=marker_map[comp],
-        ms=3.0,
-        mew=0.8,
-        mec=color_map[comp],
-        mfc=color_map[comp],
-        elinewidth=0.6,
-        capsize=1.5,
-        capthick=0.6,
-        color=color_map[comp],
-        label=comp,
-        zorder=4
-    )
+    ax.errorbar(d["r"], d["y"], yerr=d["e"], fmt='o', ms=4, label=comp, color=color_map[comp])
 
-# Fits
-for comp, res in fit_results.items():
-    color = color_map.get(comp, "0.3")
-    y_fit = res["y_fit"]
-    ax.semilogy(R_GRID, y_fit, "-", lw=1.0, color=color, alpha=0.95, zorder=3, label="_nolegend_")
+# fit curves + shaded confidence bands (mean fit)
+for comp, curve in fit_curves.items():
+    col = color_map.get(comp, None)
+    ax.semilogy(R_GRID, curve, '--', linewidth=1.2, alpha=0.9, color=col, label='_nolegend_')
+    if comp in bands:
+        lo, hi = bands[comp]
+        lo = np.clip(lo, 1e-300, np.inf)  # strictly positive for log axis
+        ax.fill_between(R_GRID, lo, hi, color=col, alpha=0.15, linewidth=0, label='_nolegend_')
 
-# Axes
 ax.set_xlabel("Inner vessel radius (mm)")
 ax.set_ylabel("Background (counts/yr)")
 ax.set_yscale("log")
-ax.set_xlim(R_GRID.min(), R_GRID.max())
 ax.set_ylim(1e-6, 2e-1)
-ax.grid(True, which="both", linestyle=":", alpha=0.35)
+ax.grid(True, which="both", linestyle=':', alpha=0.4)
+ax.legend()
+ax.set_title("Background Contribution vs IV Radius — fits with confidence bands ({}σ)".format(Z_BAND))
 
-# Legend
-leg = ax.legend(loc="best", ncol=2, handlelength=1.4, columnspacing=0.8,
-                framealpha=0.9, fontsize=10)
-leg.get_frame().set_linewidth(0.8)
-
-# Optional: print μ
-for comp, res in fit_results.items():
-    print(f"{comp}: μ = {res['mu']:.4f} 1/mm")
-
-ax.set_title("Background Contribution vs IV Radius", pad=8)
+plt.tight_layout()
+plt.savefig("bkgd_vs_radius_bands.png", dpi=250)
 plt.show()
+print("Saved figure -> bkgd_vs_radius_bands.png")
