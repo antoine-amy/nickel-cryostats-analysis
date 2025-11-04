@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Background vs IV radius analysis from 'Summary' sheet, with confidence bands.
+Background vs IV radius analysis from 'Summary' sheet, with confidence bands,
+plus printed intersection points against the HFE(no Rn-222) curve.
 
 • HFE (no Rn-222): analytic geometry-based model (explicit 4π r^2 and
   f_solid(r) = 0.5 * (R_TPC / r)^2), NO path-length multiplier.
   We fit normalization C and attenuation μ, and propagate their covariance.
 
-• Others (HFE, IV, OV, Water, Water (theoretical)):
+• Others (HFE, IV, OV, Water theoretical):
   y(r) = A * exp(k r). We fit A,k with weights from the y-errors,
   then compute bands via the delta method.
 
@@ -28,6 +29,11 @@ R_TPC = 56.665
 H_TPC = 59.15  # unused in analytic model (kept for reference)
 
 Z_BAND = 1.0  # 1σ confidence band; set 1.96 for ~95%
+
+# Font sizes
+FS_LABEL = 18
+FS_TICK = 14
+FS_LEGEND = 14
 
 # ---------- Data loading ----------
 def load_data(filepath):
@@ -148,6 +154,36 @@ def fit_attenuation_with_bands(r, y, e, xgrid=R_GRID, z=Z_BAND):
 
     return {"params": (A, k), "cov": pcov, "curve": y_grid, "lo": lo, "hi": hi, "mu": -k}
 
+# ---------- Utilities: curve intersections ----------
+def _interp_log(xi, x, y):
+    """Log-linear interpolate strictly positive y(x) at xi."""
+    y = np.clip(y, 1e-300, np.inf)
+    return np.exp(np.interp(xi, x, np.log(y)))
+
+def find_intersections(x, y1, y2):
+    """
+    Return (xs, ys) where curves y1(x) and y2(x) cross.
+    xs, ys are numpy arrays (could be multiple crossings).
+    """
+    y1 = np.asarray(y1, float); y2 = np.asarray(y2, float)
+    d = y1 - y2
+    idx = np.where(np.sign(d[:-1]) * np.sign(d[1:]) <= 0)[0]
+    xs, ys = [], []
+    for i in idx:
+        x0, x1 = x[i], x[i+1]
+        d0, d1 = d[i], d[i+1]
+        if d1 == d0:
+            t = 0.0
+        else:
+            t = d0 / (d0 - d1)  # linear interpolation of zero crossing
+        t = np.clip(t, 0.0, 1.0)
+        xi = x0 + t * (x1 - x0)
+        y1i = _interp_log(xi, x, y1)
+        y2i = _interp_log(xi, x, y2)
+        yi = 0.5 * (y1i + y2i)
+        xs.append(xi); ys.append(yi)
+    return np.array(xs), np.array(ys)
+
 # ---------- Main ----------
 df = load_data(XLSX_PATH)
 
@@ -160,7 +196,10 @@ for comp in df["Component"].unique():
         "e": d["e"].fillna(0).to_numpy(),
     }
 
-comps_order = [c for c in ["HFE (no Rn-222)", "HFE", "IV", "OV", "Water", "Water (theoretical)"] if c in series]
+comps_order = [c for c in [
+    "HFE (no Rn-222)", "HFE", "IV", "OV",
+    "Water", "Water (theoretical)", "Transition Box"
+] if c in series]
 default_colors = plt.rcParams['axes.prop_cycle'].by_key().get('color', [])
 color_map = {comp: default_colors[i % len(default_colors)] for i, comp in enumerate(comps_order)}
 
@@ -178,7 +217,7 @@ if "HFE (no Rn-222)" in series:
         print(f"HFE (no Rn-222): μ = {mu_mm:.4f} 1/mm, C = {C:.3g}")
 
 # Others: exponential fit + band
-for comp in ["HFE", "IV", "OV", "Water (theoretical)"]:
+for comp in ["HFE", "IV", "OV", "Water (theoretical)", "Transition Box"]:
     if comp in series:
         d = series[comp]
         res = fit_attenuation_with_bands(d["r"], d["y"], d["e"])
@@ -189,6 +228,18 @@ for comp in ["HFE", "IV", "OV", "Water (theoretical)"]:
         bands[comp] = (res["lo"], res["hi"])
         mus[comp] = mu
         print(f"{comp}: μ = {mu:.4f} 1/mm (A = {A:.3g}, k = {k:.4g})")
+
+# ---------- Crossings vs HFE (no Rn-222) ----------
+baseline = "HFE (no Rn-222)"
+if baseline in fit_curves:
+    for comp in ["Water (theoretical)", "OV", "IV", "Transition Box"]:
+        if comp in fit_curves:
+            xs, ys = find_intersections(R_GRID, fit_curves[comp], fit_curves[baseline])
+            if xs.size:
+                for j, (xi, yi) in enumerate(zip(xs, ys), 1):
+                    print(f"{comp} crosses {baseline} at r ≈ {xi:.1f} mm, y ≈ {yi:.3g} counts/yr (#{j})")
+            else:
+                print(f"{comp} does not cross {baseline} on [{R_GRID.min():.0f}, {R_GRID.max():.0f}] mm.")
 
 # ---------- Plot ----------
 fig, ax = plt.subplots(figsize=(12, 8))
@@ -207,13 +258,13 @@ for comp, curve in fit_curves.items():
         lo = np.clip(lo, 1e-300, np.inf)  # strictly positive for log axis
         ax.fill_between(R_GRID, lo, hi, color=col, alpha=0.15, linewidth=0, label='_nolegend_')
 
-ax.set_xlabel("Inner vessel radius (mm)")
-ax.set_ylabel("Background (counts/yr)")
+ax.set_xlabel("Inner vessel radius (mm)", fontsize=FS_LABEL)
+ax.set_ylabel("Background (counts/yr)", fontsize=FS_LABEL)
 ax.set_yscale("log")
-ax.set_ylim(1e-6, 2e-1)
+ax.set_ylim(1e-5, 2e-1)
+ax.tick_params(axis='both', which='major', labelsize=FS_TICK)
 ax.grid(True, which="both", linestyle=':', alpha=0.4)
-ax.legend()
-ax.set_title("Background Contribution vs IV Radius — fits with confidence bands ({}σ)".format(Z_BAND))
+ax.legend(fontsize=FS_LEGEND)
 
 plt.tight_layout()
 plt.savefig("bkgd_vs_radius_bands.png", dpi=250)

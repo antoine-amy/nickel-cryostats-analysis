@@ -54,18 +54,15 @@ OUTSIDE_HFE: List[str] = [
     "Inner Vessel Support",
     "Inner Cryostat MLI",
     "Inner Cryostat",
-    # "CRE Transition Enclosures",
-    # "CRE Transition Boards",
-    # "PRE Transition Enclosures",
-    # "PRE Transition Boards",
+    "CRE Transition Enclosures", #can be moved up if contribution is significant.
+    "CRE Transition Boards", #can be moved up if contribution is significant.
+    "PRE Transition Enclosures", #can be moved up if contribution is significant.
+    "PRE Transition Boards", #can be moved up if contribution is significant.
     "OD: PMTs, PMT cable, and PMT mounts",
     "OD: Tank",
-    # "HV Tubes",
-    # "HV Cables",
-    # "HV Feedthrough",
-    # "HV Feedthrough Core (Teflon)",
-    # "HV Feedthrough Core (Cable)",
-    # "HV Feedthrough Core (Conductive PE)",
+    #outer cryostat superstructure.
+    # add HFE itself
+
 ]
 
 
