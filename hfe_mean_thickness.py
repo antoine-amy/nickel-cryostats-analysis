@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 A    = 638.5    # cylinder radius
 H    = 1277.0   # cylinder full height
 R_IC = 1691.0   # enclosing inner cryostat radius
-MU   = 0.007    # attenuation coefficient for HFE-7200 (2.5 MeV gamma)
+MU   = 0.00674403    # attenuation coefficient for HFE-7200 at 165 K (2.5 MeV gamma)
 
 # ---- θ grid (avoid singular endpoints) ----
 EPS   = 1e-6

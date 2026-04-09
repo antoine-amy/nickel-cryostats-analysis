@@ -8,7 +8,7 @@ Model (explicit):
 with f_solid(r) = 0.5 * (R_TPC / r)^2  (1/r^2 solid-angle model)
 
 We fit μ to the MC points (with a single normalization at 169.1 cm),
-and overlay the theory curve with μ_theory = 0.00592496 1/mm.
+and overlay the theory curve with μ_theory = 0.00674403 1/mm.
 """
 
 import numpy as np
@@ -26,8 +26,8 @@ R_TPC_cm = 56.665
 R_TPC_mm = R_TPC_cm * 10.0
 NORM_RADIUS_CM = 169.1  # reference for normalization
 
-# Theory μ (2.5 MeV photon attenuation in HFE)
-MU_THEORY = 0.00592496  # 1/mm
+# Theory μ (2.5 MeV photon attenuation in HFE-7200 at 165 K)
+MU_THEORY = 0.00674403  # 1/mm
 
 # Radius/thickness grids
 R_GRID = np.linspace(R_TPC_mm, 2200, 4000)  # mm

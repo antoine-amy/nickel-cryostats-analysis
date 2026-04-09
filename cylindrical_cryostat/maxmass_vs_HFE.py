@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 # ── Reference & attenuation ──────────────────────────────────────────────
 t0 = 0.76                         # m, reference HFE thickness
-MU_GAMMA = 0.007                 # mm⁻¹
+MU_GAMMA = 0.00674403            # mm⁻¹, HFE-7200 at 165 K
 
 # ── Activities (mBq/kg) and 1σ errors ────────────────────────────────────
 ACT_Th232, ACT_Th232_ERR = 2.65e-4, 1.09e-4  # mBq/kg

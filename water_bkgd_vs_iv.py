@@ -350,7 +350,7 @@ def baseline_materials() -> MaterialProperties:
     return MaterialProperties(
         rho_water_kg_per_m3=1000.0,
         mu_water_mm=0.0045,
-        mu_hfe_mm=0.00592496,
+        mu_hfe_mm=0.00674403,
     )
 
 

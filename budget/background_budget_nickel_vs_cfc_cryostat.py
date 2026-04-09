@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-Script to create side-by-side plots comparing background budgets 
-for CFC (Carbon Composite Fiber) and Nickel Cryostats.
+Script to create side-by-side plots comparing background budgets
+for CFC (Carbon Fiber Composite) and Nickel Cryostats.
 The CFC data is partially generated from hard-coded values.
 Modified to not share the x-axis for cryostat components.
 """
@@ -64,6 +64,12 @@ NICKEL_CRYOSTAT_COMPONENTS = [
     "Inner Cryostat Liner"
 ]
 
+# Components to highlight/sum for Nickel
+NICKEL_CRYOSTAT_HIGHLIGHT_COMPONENTS = [
+    "Outer Cryostat",
+    "Inner Cryostat",
+]
+
 # For CFC version, define a separate list
 CFC_CRYOSTAT_COMPONENTS = [
     "Outer Cryostat (CFC)",
@@ -73,7 +79,7 @@ CFC_CRYOSTAT_COMPONENTS = [
 ]
 
 # Combined list of all cryostat components across both types
-ALL_CRYOSTAT_COMPONENTS = NICKEL_CRYOSTAT_COMPONENTS + CFC_CRYOSTAT_COMPONENTS
+ALL_CRYOSTAT_COMPONENTS = NICKEL_CRYOSTAT_HIGHLIGHT_COMPONENTS + CFC_CRYOSTAT_COMPONENTS
 
 # Define color scheme for different component categories
 COMPONENT_COLORS = {
@@ -145,7 +151,10 @@ def reformat_labels_latex(label):
         "bb2n": r"$2\nu\beta\beta$",
         "B8nu": r"Solar $\nu$",
     }
-    return mapping.get(label, label)
+    formatted = mapping.get(label, label)
+    if isinstance(formatted, str):
+        formatted = formatted.replace(" (CFC)", "")
+    return formatted
 
 
 class PlotConfig:
@@ -276,7 +285,11 @@ def make_single_plot(df, groupby, ax, config, cryostat_type="nickel"):
         cryostat_type: Type of cryostat ('nickel' or 'cfc')
     """
     # Select the appropriate cryostat components to highlight
-    cryostat_components = NICKEL_CRYOSTAT_COMPONENTS if cryostat_type == "nickel" else CFC_CRYOSTAT_COMPONENTS
+    cryostat_components = (
+        NICKEL_CRYOSTAT_HIGHLIGHT_COMPONENTS
+        if cryostat_type == "nickel"
+        else CFC_CRYOSTAT_COMPONENTS
+    )
     
     # Prepare the data with all components sorted by background contribution
     df_grouped, labels, y_positions = prepare_plot_data(df, groupby, config.min_count)
@@ -354,7 +367,7 @@ def create_label_axis(ax, y_positions, labels, config):
         # Set color and formatting based on component type
         if label in ALL_CRYOSTAT_COMPONENTS:
             # Determine which type of cryostat component it is
-            is_nickel = label in NICKEL_CRYOSTAT_COMPONENTS
+            is_nickel = label in NICKEL_CRYOSTAT_HIGHLIGHT_COMPONENTS
             is_cfc = label in CFC_CRYOSTAT_COMPONENTS
             
             weight = 'bold'
@@ -574,7 +587,7 @@ def create_comparison_plot(nickel_file, output_path, min_count=0.0001):
         },
         fontsize=21,
         min_count=min_count,
-        title="Carbon Composite Fiber Cryostat",
+        title="Carbon Fiber Composite Cryostat",
         cryostat_type="cfc"
     )
     
@@ -586,6 +599,20 @@ def create_comparison_plot(nickel_file, output_path, min_count=0.0001):
     if min_count is not None:
         nickel_grouped = nickel_grouped[nickel_grouped["TG Mean"] >= min_count]
         cfc_grouped = cfc_grouped[cfc_grouped["TG Mean"] >= min_count]
+    
+    # Summarize highlighted cryostat components (same ones shaded in the plot)
+    nickel_cryostat_sum = nickel_grouped.loc[
+        nickel_grouped.index.isin(NICKEL_CRYOSTAT_HIGHLIGHT_COMPONENTS), "TG Mean"
+    ].sum()
+    cfc_cryostat_sum = cfc_grouped.loc[
+        cfc_grouped.index.isin(CFC_CRYOSTAT_COMPONENTS), "TG Mean"
+    ].sum()
+    ratio_cfc_to_nickel = cfc_cryostat_sum / nickel_cryostat_sum if nickel_cryostat_sum else float("inf")
+    print(
+        "Highlighted cryostat sums (after min_count filter, Nickel outer/inner only): "
+        f"Nickel={nickel_cryostat_sum:.6e}, CFC={cfc_cryostat_sum:.6e}, "
+        f"CFC/Nickel={ratio_cfc_to_nickel:.6e}"
+    )
     
     # Sort by background contribution
     nickel_grouped = nickel_grouped.sort_values("TG Mean", ascending=True)
@@ -685,7 +712,11 @@ def create_comparison_plot(nickel_file, output_path, min_count=0.0001):
     # Create the custom plot function that doesn't sort the components
     def make_custom_plot(df, ax, config, cryostat_type="nickel"):
         """Create plot with pre-ordered components (no sorting)"""
-        cryostat_components = NICKEL_CRYOSTAT_COMPONENTS if cryostat_type == "nickel" else CFC_CRYOSTAT_COMPONENTS
+        cryostat_components = (
+            NICKEL_CRYOSTAT_HIGHLIGHT_COMPONENTS
+            if cryostat_type == "nickel"
+            else CFC_CRYOSTAT_COMPONENTS
+        )
         marker = "o"  # Changed from "." to "o" for better visibility
         
         # Set up axis properties
@@ -746,8 +777,8 @@ def create_comparison_plot(nickel_file, output_path, min_count=0.0001):
         return y_positions, labels
     
     # Make the plots with our custom ordered datasets
-    pos1, labels1 = make_custom_plot(nickel_plot_df, ax1, nickel_config, cryostat_type="nickel")
-    pos2, labels2 = make_custom_plot(cfc_plot_df, ax2, cfc_config, cryostat_type="cfc")
+    pos1, labels1 = make_custom_plot(cfc_plot_df, ax1, cfc_config, cryostat_type="cfc")
+    pos2, labels2 = make_custom_plot(nickel_plot_df, ax2, nickel_config, cryostat_type="nickel")
     
     # Create a combined label axis using both sets of components
     def create_combined_label_axis(ax, positions, nickel_labels, cfc_labels):
@@ -776,7 +807,7 @@ def create_comparison_plot(nickel_file, output_path, min_count=0.0001):
             label_text = reformat_labels_latex(display_label)
             
             # Format differently based on component type
-            is_nickel_cryostat = nickel_label in NICKEL_CRYOSTAT_COMPONENTS
+            is_nickel_cryostat = nickel_label in NICKEL_CRYOSTAT_HIGHLIGHT_COMPONENTS
             is_cfc_cryostat = cfc_label in CFC_CRYOSTAT_COMPONENTS
             
             if is_nickel_cryostat or is_cfc_cryostat:
@@ -818,7 +849,7 @@ def create_comparison_plot(nickel_file, output_path, min_count=0.0001):
                   bbox_to_anchor=(0, -0.12))
     
     # Create the combined component labels
-    create_combined_label_axis(ax_labels, pos1, labels1, labels2)
+    create_combined_label_axis(ax_labels, pos1, labels2, labels1)
     
     # Ensure all plots have the same y-axis limits for alignment
     ymin, ymax = ax1.get_ylim()
@@ -840,12 +871,12 @@ def main():
     )
     parser.add_argument(
         "--nickel_file",
-        default="background/Summary_D-047_v86_250113-233135_2025-02-21.xlsx",
+        default="/Users/antoine/My Drive/Documents/Thèse/Nickel Cryostats/nickel-cryostats-analysis/budget/Summary_D-047_v86_250113-233135_2025-09-11.xlsx",
         help="Path to Nickel cryostat Excel file",
     )
     parser.add_argument(
         "--output_path",
-        default="background/nickel_vs_cfc_ic.pdf",
+        default="background_budget_nickel_vs_cfc_cryostat.pdf",
         help="Path to save the output plot",
     )
     parser.add_argument(
